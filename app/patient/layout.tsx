@@ -1,7 +1,6 @@
 import React from "react"
 import { Header } from "@/components/header";
 import { Sidebar } from "@/components/sidebar";
-import { currentPatient } from "@/lib/mockData";
 
 export default function PatientLayout({
   children,
@@ -10,11 +9,7 @@ export default function PatientLayout({
 }) {
   return (
     <div className="min-h-screen bg-background">
-      <Header
-        userName={currentPatient.name}
-        userInitials={currentPatient.initials}
-        role="patient"
-      />
+      <Header role="patient" />
       <div className="flex">
         <Sidebar role="patient" />
         <main className="flex-1 p-6">{children}</main>

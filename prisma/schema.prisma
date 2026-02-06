@@ -1,0 +1,141 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// These are the roles
+enum Role {
+  ADMIN
+  DOCTOR
+  PATIENT
+}
+
+// User Schema
+model User {
+  id        String   @id @default(uuid())
+  clerkId   String   @unique // <--- ADD THIS. This matches the ID inside Clerk.
+  email     String   @unique
+  name      String?
+  role      Role     @default(PATIENT)
+  createdAt DateTime @default(now())
+
+  // Relations
+  doctorProfile  DoctorProfile?
+  patientProfile PatientProfile?
+}
+
+// Doctor Schema
+model DoctorProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id])
+  specialization String
+  
+  appointments   Appointment[]
+  prescriptions  Prescription[]
+}
+
+// Patient Schema
+model PatientProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Demographics
+  dateOfBirth    DateTime?
+  gender         String?
+  phone          String?
+  address        String?
+  emergencyContact String?
+
+  // Medical Stats
+  bloodType      String?
+  height         String? // Stored as string to match "5'11"" or "180cm" flexible for now, or Float for calc
+  weight         String? // Stored as string "160 lbs"
+  
+  // Clinical Data
+  allergies      String? // Comma separated
+  conditions     String? // Comma separated chronic conditions
+  
+  // AI Summary
+  aiSummary      String?
+  
+  appointments   Appointment[]
+  prescriptions  Prescription[]
+  healthMetrics  HealthMetric[]
+  notes          PatientNote[]
+  reminders      PatientReminder[]
+}
+
+// Prescription
+model Prescription {
+  id          String   @id @default(uuid())
+  name        String
+  dosage      String
+  frequency   String
+  startDate   DateTime
+  endDate     DateTime?
+  status      String   @default("ACTIVE") // ACTIVE, COMPLETED, DISCONTINUED
+  prescribedBy String? // Doctor name fallback
+  
+  patientId   String
+  patient     PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  doctorId    String?
+  doctor      DoctorProfile? @relation(fields: [doctorId], references: [id])
+}
+
+// Health Metrics for Trends
+model HealthMetric {
+  id          String   @id @default(uuid())
+  type        String   // "Blood Pressure", "Heart Rate", "Weight"
+  value       String   // "120/80", "72"
+  unit        String?  // "mmHg", "bpm"
+  trend       String?  // "up", "down", "stable"
+  status      String?  // "Normal", "Warning"
+  date        DateTime @default(now())
+  
+  patientId   String
+  patient     PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+}
+
+// Patient Note
+model PatientNote {
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  tags      String? // Comma separated tags
+  date      DateTime @default(now())
+  
+  patientId String
+  patient   PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+}
+
+// Patient Reminder
+model PatientReminder {
+  id        String   @id @default(uuid())
+  text      String
+  date      DateTime @default(now())
+  isCompleted Boolean @default(false)
+
+  patientId String
+  patient   PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
+}
+
+// Appointment
+model Appointment {
+  id        String   @id @default(uuid())
+  date      DateTime
+  status    String   @default("PENDING") // PENDING, COMPLETED, CANCELLED
+  reason    String?
+  notes     String?
+  
+  doctorId  String?
+  doctor    DoctorProfile? @relation(fields: [doctorId], references: [id])
+  
+  patientId String
+  patient   PatientProfile @relation(fields: [patientId], references: [id])
+}
