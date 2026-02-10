@@ -130,8 +130,15 @@
   * {
     @apply border-border outline-ring/50;
   }
+
+  /* 🔽 Global UI scale + zoomed-out feel */
+  html {
+    font-size: 14.5px;
+  }
+
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
+    font-weight: 400;
   }
 }
