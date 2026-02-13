@@ -18,6 +18,7 @@ import {
   ChevronsUpDown,
   LogOut,
   BadgeCheck,
+  ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -39,6 +40,7 @@ import {
   SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { ClinicalSidebar } from "@/components/clinical-sidebar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -102,6 +104,14 @@ export function Sidebar({ role }: SidebarProps) {
   const { user } = useUser();
   const { signOut, openUserProfile } = useClerk();
   const { isMobile } = useSidebar();
+  const [isClinicalSidebarOpen, setIsClinicalSidebarOpen] = React.useState(false);
+
+  // Close clinical sidebar when navigating away from clinical session
+  React.useEffect(() => {
+    if (pathname !== "/doctor/clinical-session") {
+      setIsClinicalSidebarOpen(false);
+    }
+  }, [pathname]);
 
   // Define groups based on role
   const navGroups = role === "doctor" 
@@ -114,6 +124,7 @@ export function Sidebar({ role }: SidebarProps) {
       ];
 
   return (
+    <>
     <ShadcnSidebar collapsible="icon" className="border-r bg-sidebar">
       <SidebarHeader className="h-fit gap-0 p-2">
         <SidebarMenu>
@@ -167,22 +178,44 @@ export function Sidebar({ role }: SidebarProps) {
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => {
-                  const isActive = pathname === item.href;
+                  const isClinicalSession = item.label === "Clinical Session";
+                  // Active state is driven by path, except for Clinical Session which is just a trigger
+                  const isActive = isClinicalSession ? false : pathname === item.href;
+                  
                   return (
                     <SidebarMenuItem key={item.label}>
                       <SidebarMenuButton 
-                        asChild 
+                        asChild={!isClinicalSession} 
                         isActive={isActive}
                         tooltip={item.label}
                         className={`
                           transition-all duration-200 
                           ${isActive ? "font-medium bg-stone-100 text-primary border-l-4 border-primary rounded-r-lg rounded-l-none pl-3" : "text-muted-foreground pl-4"}
+                          ${isClinicalSession ? "cursor-pointer hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" : ""}
                         `}
+                        onClick={(e) => {
+                           if (isClinicalSession) {
+                               e.preventDefault();
+                               setIsClinicalSidebarOpen(!isClinicalSidebarOpen);
+                           } else {
+                               setIsClinicalSidebarOpen(false);
+                           }
+                        }}
                       >
-                        <Link href={item.href}>
-                          <item.icon className={isActive ? "text-primary" : "text-muted-foreground"} />
-                          <span>{item.label}</span>
-                        </Link>
+                         {isClinicalSession ? (
+                            <>
+                                <item.icon className={isActive ? "text-primary" : "text-muted-foreground"} />
+                                <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">{item.label}</span>
+                                <ChevronRight 
+                                  className={`ml-auto h-4 w-4 transition-transform duration-200 group-data-[collapsible=icon]:hidden ${isClinicalSidebarOpen ? "rotate-180" : ""}`} 
+                                />
+                            </>
+                         ) : (
+                            <Link href={item.href}>
+                                <item.icon className={isActive ? "text-primary" : "text-muted-foreground"} />
+                                <span>{item.label}</span>
+                            </Link>
+                         )}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
@@ -271,5 +304,7 @@ export function Sidebar({ role }: SidebarProps) {
       </SidebarFooter>
       <SidebarRail />
     </ShadcnSidebar>
+    {isClinicalSidebarOpen && <ClinicalSidebar />}
+    </>
   );
 }
