@@ -1,6 +1,7 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { createUser } from "@/app/actions/userActions";
 import { Button } from "@/components/ui/button";
 import { Stethoscope, Shield, Heart, Eye } from "lucide-react";
 import Link from "next/link";
@@ -22,10 +23,22 @@ export default async function LandingPage() {
         redirect("/patient/dashboard");
       }
     } else {
-      // User created in Clerk but not DB yet (webhook latency)
-      // Redirect to a loading/checking page or just patient as fallback
-      // For now, let's assume patient or stay here
-      console.log("User in Clerk but not DB yet");
+      // User created in Clerk but not DB yet (webhook latency or failure)
+      // Sync user to DB
+      try {
+        await createUser({
+          clerkId: user.id,
+          email: user.emailAddresses[0].emailAddress,
+          name: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
+        });
+      } catch (error) {
+        console.error("Error syncing user in LandingPage:", error);
+        // If create fails, it might preserve race condition or DB error. 
+        // We can try to find them again or just continue to landing page to retry.
+      }
+      
+      // Redirect after attempting sync
+      redirect("/patient/dashboard");
     }
   }
 
