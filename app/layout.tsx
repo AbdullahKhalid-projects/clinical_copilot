@@ -47,7 +47,10 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en">
-        <body className={`${inter.variable} ${libreBaskerville.variable} font-sans antialiased text-[#2D2422] bg-[#FAF9F6]`}>
+        <body 
+          className={`${inter.variable} ${libreBaskerville.variable} font-sans antialiased text-[#2D2422] bg-[#FAF9F6]`}
+          suppressHydrationWarning
+        >
           {children}
           <Analytics />
         </body>

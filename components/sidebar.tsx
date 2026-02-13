@@ -99,8 +99,8 @@ export function Sidebar({ role }: SidebarProps) {
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <div className="flex items-center gap-2">
+            <div className="group-data-[collapsible=icon]:justify-center flex w-full items-center justify-between p-2">
+              <div className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
                 <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white w-5 h-5">
                         <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20Z" fill="currentColor" fillOpacity="0.2"/>
@@ -111,7 +111,8 @@ export function Sidebar({ role }: SidebarProps) {
                   <span className="font-semibold text-lg font-serif">Shifa Scribe</span>
                 </div>
               </div>
-            </SidebarMenuButton>
+              <SidebarTrigger />
+            </div>
           </SidebarMenuItem>
         </SidebarMenu>
         
