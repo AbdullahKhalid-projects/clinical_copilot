@@ -14,7 +14,6 @@ import {
   AudioLines,
   Settings,
   HelpCircle,
-  Bell,
   Plus,
   ChevronsUpDown,
   LogOut,
@@ -55,6 +54,11 @@ import {
   AvatarFallback,
   AvatarImage,
 } from "@/components/ui/avatar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface NavItem {
   label: string;
@@ -62,6 +66,7 @@ interface NavItem {
   icon: React.ElementType;
 }
 
+// Patient Items (Kept as one group for now)
 const patientNavItems: NavItem[] = [
   { label: "Dashboard", href: "/patient/dashboard", icon: LayoutDashboard },
   { label: "Visit Summaries", href: "/patient/visit-summaries", icon: ClipboardList },
@@ -71,12 +76,17 @@ const patientNavItems: NavItem[] = [
   { label: "Medications", href: "/patient/medications", icon: Pill },
 ];
 
-const doctorNavItems: NavItem[] = [
+// Doctor Group 1: Menu
+const doctorMenuItems: NavItem[] = [
   { label: "Dashboard", href: "/doctor/dashboard", icon: LayoutDashboard },
   { label: "Clinical Session", href: "/doctor/clinical-session", icon: AudioLines },
-  { label: "Post-Visit Editor", href: "/doctor/post-visit", icon: FileText },
+];
+
+// Doctor Group 2: My Space
+const doctorSpaceItems: NavItem[] = [
   { label: "My Patients", href: "/doctor/patients", icon: Users },
   { label: "Schedule", href: "/doctor/schedule", icon: Calendar },
+  { label: "Post-Visit Editor", href: "/doctor/post-visit", icon: FileText },
 ];
 
 const bottomItems: NavItem[] = [
@@ -92,83 +102,104 @@ export function Sidebar({ role }: SidebarProps) {
   const { user } = useUser();
   const { signOut, openUserProfile } = useClerk();
   const { isMobile } = useSidebar();
-  const mainNavItems = role === "doctor" ? doctorNavItems : patientNavItems;
+
+  // Define groups based on role
+  const navGroups = role === "doctor" 
+    ? [
+        { label: "Menu", items: doctorMenuItems },
+        { label: "My Space", items: doctorSpaceItems }
+      ]
+    : [
+        { label: "Menu", items: patientNavItems }
+      ];
 
   return (
-    <ShadcnSidebar collapsible="icon">
-      <SidebarHeader>
+    <ShadcnSidebar collapsible="icon" className="border-r bg-sidebar">
+      <SidebarHeader className="h-fit gap-0 p-2">
         <SidebarMenu>
           <SidebarMenuItem>
-            <div className="group-data-[collapsible=icon]:justify-center flex w-full items-center justify-between p-2">
-              <div className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white w-5 h-5">
-                        <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20Z" fill="currentColor" fillOpacity="0.2"/>
-                        <path d="M11 7H13V11H17V13H13V17H11V13H7V11H11V7Z" fill="currentColor"/>
-                     </svg>
-                </div>
-                <div className="flex flex-col gap-0.5 leading-none">
-                  <span className="font-semibold text-lg font-serif">Shifa Scribe</span>
-                </div>
-              </div>
-              <SidebarTrigger />
+            {/* Header Box */}
+            <div className="flex w-full items-center justify-between rounded-lg bg-[#fef08a] p-3 transition-all duration-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-2">
+              <span className="whitespace-nowrap font-serif text-lg font-bold text-black group-data-[collapsible=icon]:hidden w-full text-center">
+                Shifa Scribe
+              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <SidebarTrigger className="text-black hover:bg-black/10 shrink-0" />
+                </TooltipTrigger>
+                <TooltipContent side="right">Toggle Sidebar</TooltipContent>
+              </Tooltip>
             </div>
           </SidebarMenuItem>
         </SidebarMenu>
         
-        <SidebarMenu className="mt-2">
-            <SidebarMenuItem>
+        <SidebarMenu className="mt-3">
+            {/* Button Container */}
+            <SidebarMenuItem className="px-1-4"> 
                <Button 
-                   className="w-full justify-start gap-2 bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground group-data-[collapsible=icon]:hidden shadow-none" 
-                   size="sm"
+                   className="w-full justify-center gap-2 bg-primary text-primary-foreground hover:bg-black hover:text-white group-data-[collapsible=icon]:hidden shadow-md h-10 font-semibold" 
                >
-                    <Plus className="h-4 w-4" />
+                    <Plus className="h-4 w-4" /> 
                     <span>New Appointment</span>
                </Button>
-                <Button 
-                    className="h-8 w-8 p-0 hidden group-data-[collapsible=icon]:flex mx-auto bg-primary text-primary-foreground hover:bg-primary/90" 
-                    size="icon"
-                >
-                    <Plus className="h-4 w-4" />
-                </Button>
+               
+               <Tooltip>
+                 <TooltipTrigger asChild>
+                    <Button 
+                        className="h-9 w-9 p-0 hidden group-data-[collapsible=icon]:flex mx-auto bg-primary text-primary-foreground hover:bg-black hover:text-white rounded-lg" 
+                        size="icon"
+                    >
+                        <Plus className="h-5 w-5" />
+                    </Button>
+                 </TooltipTrigger>
+                 <TooltipContent side="right">New Appointment</TooltipContent>
+               </Tooltip>
             </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Menu</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {mainNavItems.map((item) => (
-                <SidebarMenuItem key={item.label}>
-                  <SidebarMenuButton 
-                    asChild 
-                    isActive={pathname === item.href}
-                    tooltip={item.label}
-                  >
-                    <Link href={item.href}>
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* Settings moved to Footer */}
+        {navGroups.map((group) => (
+          <SidebarGroup key={group.label}>
+            <SidebarGroupLabel className="uppercase tracking-wider text-xs font-semibold text-muted-foreground/70">
+              {group.label}
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.items.map((item) => {
+                  const isActive = pathname === item.href;
+                  return (
+                    <SidebarMenuItem key={item.label}>
+                      <SidebarMenuButton 
+                        asChild 
+                        isActive={isActive}
+                        tooltip={item.label}
+                        className={`
+                          transition-all duration-200 
+                          ${isActive ? "font-medium bg-stone-100 text-primary border-l-4 border-primary rounded-r-lg rounded-l-none pl-3" : "text-muted-foreground pl-4"}
+                        `}
+                      >
+                        <Link href={item.href}>
+                          <item.icon className={isActive ? "text-primary" : "text-muted-foreground"} />
+                          <span>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarSeparator className="mx-0" />
+
+      <SidebarFooter className="p-2">
         <SidebarMenu>
             {role === "doctor" && bottomItems.map((item) => (
                 <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton 
-                        asChild 
-                        tooltip={item.label}
-                    >
+                    <SidebarMenuButton asChild tooltip={item.label} className="pl-4 text-muted-foreground">
                         <Link href={item.href}>
                             <item.icon />
                             <span>{item.label}</span>
@@ -177,34 +208,30 @@ export function Sidebar({ role }: SidebarProps) {
                 </SidebarMenuItem>
             ))}
             <SidebarMenuItem>
-                <SidebarMenuButton tooltip="Help">
+                <SidebarMenuButton tooltip="Help" className="pl-4 text-muted-foreground">
                     <HelpCircle />
                     <span>Help</span>
                 </SidebarMenuButton>
             </SidebarMenuItem>
-            <SidebarMenuItem>
-                <SidebarMenuButton tooltip="Notifications">
-                    <Bell />
-                    <span>Notifications</span>
-                </SidebarMenuButton>
-            </SidebarMenuItem>
             
+            <div className="h-2" />
+
             <SidebarMenuItem>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <SidebarMenuButton
                     size="lg"
-                    className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                    className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground border border-transparent hover:border-stone-200 hover:bg-white hover:shadow-sm transition-all rounded-xl"
                   >
-                    <Avatar className="h-8 w-8 rounded-lg">
+                    <Avatar className="h-8 w-8 rounded-lg border border-stone-200">
                       <AvatarImage src={user?.imageUrl} alt={user?.fullName || ""} />
                       <AvatarFallback className="rounded-lg">CN</AvatarFallback>
                     </Avatar>
                     <div className="grid flex-1 text-left text-sm leading-tight">
-                      <span className="truncate font-semibold">{user?.fullName}</span>
-                      <span className="truncate text-xs">{user?.primaryEmailAddress?.emailAddress}</span>
+                      <span className="truncate font-semibold text-primary">{user?.fullName}</span>
+                      <span className="truncate text-xs text-muted-foreground">{user?.primaryEmailAddress?.emailAddress}</span>
                     </div>
-                    <ChevronsUpDown className="ml-auto size-4" />
+                    <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
                   </SidebarMenuButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
