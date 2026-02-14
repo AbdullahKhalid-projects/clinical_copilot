@@ -130,13 +130,29 @@ model PatientReminder {
 model Appointment {
   id        String   @id @default(uuid())
   date      DateTime
-  status    String   @default("PENDING") // PENDING, COMPLETED, CANCELLED
+  status    String   @default("PENDING") // PENDING, CONFIRMED, IN_PROGRESS, COMPLETED, CANCELLED
   reason    String?
   notes     String?
   
+  // New Feature: Clinical Copilot Fields
+  recordingUrl   String?  // URL to stored audio file
+  transcript     Json?    // Structured transcript: [{ speaker: "doctor" | "patient", text: "...", timestamp: 0.5 }]
+  
+  // SOAP Notes - Storing as JSON allows flexibility (e.g. { subjective: "...", objective: "...", assessment: "...", plan: "..." })
+  soapNote       Json?    
+  
+  // Generated PDF
+  soapNoteUrl    String?  // URL to the generated PDF of the SOAP note
+
+  // Metadata for AI processing status (optional but helpful)
+  aiStatus       String?  // "PROCESSING", "COMPLETED", "FAILED"
+
   doctorId  String?
   doctor    DoctorProfile? @relation(fields: [doctorId], references: [id])
   
   patientId String
   patient   PatientProfile @relation(fields: [patientId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
