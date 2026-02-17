@@ -130,8 +130,8 @@ export function Sidebar({ role }: SidebarProps) {
         <SidebarMenu>
           <SidebarMenuItem>
             {/* Header Box */}
-            <div className="flex w-full items-center justify-between rounded-lg bg-[#fef08a] p-3 transition-all duration-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-2">
-              <span className="whitespace-nowrap font-serif text-lg font-bold text-black group-data-[collapsible=icon]:hidden w-full text-center">
+            <div className="flex w-full items-center justify-between rounded-lg bg-sky-300 p-3 transition-all duration-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-2">
+              <span className="whitespace-nowrap text-lg font-black tracking-tight text-black group-data-[collapsible=icon]:hidden w-full text-center">
                 Shifa Scribe
               </span>
               <Tooltip>
@@ -247,14 +247,14 @@ export function Sidebar({ role }: SidebarProps) {
                 </SidebarMenuButton>
             </SidebarMenuItem>
             
-            <div className="h-2" />
+            <div className="h-0.5" />
 
             <SidebarMenuItem>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <SidebarMenuButton
                     size="lg"
-                    className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground border border-transparent hover:border-stone-200 hover:bg-white hover:shadow-sm transition-all rounded-xl"
+                    className="pl-4 text-muted-foreground rounded-xl transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                   >
                     <Avatar className="h-8 w-8 rounded-lg border border-stone-200">
                       <AvatarImage src={user?.imageUrl} alt={user?.fullName || ""} />
