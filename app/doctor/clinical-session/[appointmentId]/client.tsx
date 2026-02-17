@@ -155,14 +155,14 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         await uploadAudioFile(file);
         event.target.value = "";
     };
-  return (
-    <div className="flex flex-col h-full bg-background">
+    return (
+        <div className="flex flex-col h-[calc(100svh-3rem)] overflow-hidden bg-background">
       {/* Header Section */}
-            <header className="px-6 py-4 border-b sticky top-0 bg-background/95 backdrop-blur z-10">
-                <div className="flex flex-col gap-3">
-                    <div className="flex items-start justify-between gap-4">
+                        <header className="px-5 py-3 border-b bg-background/95 backdrop-blur z-10">
+                                <div className="flex flex-col gap-2.5">
+                                        <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-4 min-w-0">
-                    <Avatar className="h-12 w-12 border">
+                                        <Avatar className="h-10 w-10 border">
             <AvatarImage src={patientImage} alt={patientName} />
             <AvatarFallback>{patientInitials}</AvatarFallback>
           </Avatar>
@@ -180,12 +180,12 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
           </div>
                         </div>
 
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-3">
                          <Button
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-10 w-10 rounded-md border border-border bg-muted/40 text-foreground hover:bg-muted"
+                          className="h-9 w-9 rounded-md border border-border bg-muted/40 text-foreground hover:bg-muted"
                           onClick={() => uploadInputRef.current?.click()}
                           disabled={isUploading}
                           title="Upload Recording"
@@ -207,7 +207,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                         </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <div className="flex flex-wrap items-center gap-1.5 text-sm">
                         <Badge variant="outline" className="gap-1.5 py-1">
                             <Calendar className="h-3.5 w-3.5" />
                             {format(appointmentDate, "MMMM dd, yyyy")}
@@ -242,8 +242,8 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
   </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto p-6">
-        <div className="max-w-5xl mx-auto flex flex-col h-full gap-3">
+            <main className="flex-1 overflow-hidden p-4">
+                <div className="max-w-5xl mx-auto flex flex-col h-full gap-2.5 min-h-0">
             {/* Toolbar */}
                         <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-1.5 bg-transparent">
@@ -251,7 +251,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                         type="button"
                                         variant="ghost"
                                         onClick={() => setActiveMainTab("context")}
-                                        className="group rounded-lg px-3 h-10 text-foreground hover:bg-muted"
+                                        className="group rounded-lg px-3 h-9 text-foreground hover:bg-muted"
                                     >
                                         <SlidersHorizontal className={activeMainTab === "context" ? "h-4 w-4 text-emerald-600" : "h-4 w-4 text-muted-foreground group-hover:text-emerald-500"} />
                                         Context
@@ -261,7 +261,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                         type="button"
                                         variant="ghost"
                                         onClick={() => setActiveMainTab("transcript")}
-                                        className="group rounded-lg px-3 h-10 text-foreground hover:bg-muted"
+                                        className="group rounded-lg px-3 h-9 text-foreground hover:bg-muted"
                                     >
                                         <AudioLines className={activeMainTab === "transcript" ? "h-4 w-4 text-violet-600" : "h-4 w-4 text-muted-foreground group-hover:text-violet-500"} />
                                         Transcript
@@ -271,7 +271,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                         type="button"
                                         variant="ghost"
                                         onClick={() => setActiveMainTab("note")}
-                                        className="group rounded-lg px-3 h-10 text-foreground hover:bg-muted"
+                                        className="group rounded-lg px-3 h-9 text-foreground hover:bg-muted"
                                     >
                                         <PenLine className={activeMainTab === "note" ? "h-4 w-4 text-blue-600" : "h-4 w-4 text-muted-foreground group-hover:text-blue-500"} />
                                         Note
@@ -279,7 +279,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                 </div>
             </div>
 
-            <div className="flex flex-col flex-1 bg-card rounded-xl border shadow-sm overflow-hidden min-h-[500px]">
+            <div className="flex flex-col flex-1 min-h-0 bg-card rounded-xl border shadow-sm overflow-hidden">
                 
                 {/* Editor Toolbar */}
                 <div className="flex items-center justify-between p-2 border-b bg-muted/30">
@@ -317,7 +317,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                 </div>
 
                                 {/* Main Tab Content Area */}
-                                <div className="flex-1 flex flex-col items-center justify-center p-10 text-center space-y-4 bg-white/50 dark:bg-black/20">
+                                <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-6 text-center space-y-3 bg-white/50 dark:bg-black/20">
                                         <div className="space-y-2 max-w-md">
                                                 <h3 className="text-xl font-medium text-foreground">
                                                         Start this session using the header

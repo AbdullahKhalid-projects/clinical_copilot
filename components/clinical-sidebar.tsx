@@ -5,6 +5,10 @@ import * as React from "react";
 import {
   Search,
   RefreshCw,
+  User,
+  UserRound,
+  Clock3,
+  Check,
 } from "lucide-react";
 
 import {
@@ -15,6 +19,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { getSidebarAppointments, type SidebarAppointment } from "@/app/actions/sidebarActions";
 import { useRouter } from "next/navigation";
@@ -92,17 +97,17 @@ export function ClinicalSidebar() {
   };
 
   return (
-    <div className="w-[17rem] h-svh sticky top-0 border-r bg-white text-sidebar-foreground flex flex-col transition-all duration-300 ease-in-out" data-sidebar="sub-sidebar">
+    <div className="w-[17rem] h-svh sticky top-0 border-r border-sidebar-border/70 bg-background text-sidebar-foreground flex flex-col transition-all duration-300 ease-in-out" data-sidebar="sub-sidebar">
       {/* Header */}
-      <div className="px-3 py-3 flex flex-col gap-2 border-b bg-white z-20">
+      <div className="px-3 py-3 flex flex-col gap-2 border-b border-sidebar-border/70 bg-background/95 backdrop-blur-sm z-20">
         {/* Top actions */}
         <div className="flex items-center justify-between text-sidebar-foreground/70 mb-0.5">
             <span className="text-sm font-semibold text-foreground/80 tracking-tight">Appointments</span>
             <div className="flex items-center gap-0.5">
-                <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-muted/50" onClick={() => setIsSearchOpen(!isSearchOpen)}>
+                <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-sidebar-accent/70" onClick={() => setIsSearchOpen(!isSearchOpen)}>
                     <Search className="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-muted/50" onClick={() => {
+                <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-sidebar-accent/70" onClick={() => {
                     setLoading(true);
                     getSidebarAppointments().then(d => { setAppointments(d); setLoading(false); });
                 }}>
@@ -118,7 +123,7 @@ export function ClinicalSidebar() {
             <Input
               type="search"
               placeholder="Search..."
-              className="w-full pl-8 bg-muted/30 h-8 text-xs focus-visible:ring-1 border-muted/60"
+              className="w-full pl-8 bg-sidebar-accent/40 h-8 text-xs focus-visible:ring-1 border-sidebar-border/70"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -127,21 +132,21 @@ export function ClinicalSidebar() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "upcoming" | "past")} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 bg-muted/20 p-1 gap-1 h-8 rounded-lg">
+          <TabsList className="grid w-full grid-cols-2 bg-muted/50 border border-border/70 p-1 gap-1 h-9 rounded-xl">
             <TabsTrigger 
               value="upcoming" 
-              className="text-xs font-medium data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-sm rounded-md px-2 h-full transition-all"
+              className="text-xs font-medium text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm rounded-lg px-2 h-full transition-all hover:text-foreground"
             >
               Upcoming 
               {appointments.upcoming.length > 0 && (
-                <span className="ml-1.5 bg-primary/10 text-primary text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                <span className="ml-1.5 bg-destructive/10 text-destructive text-[10px] px-1.5 py-0.5 rounded-full font-semibold border border-destructive/25">
                     {appointments.upcoming.length}
                 </span>
               )}
             </TabsTrigger>
             <TabsTrigger 
               value="past" 
-              className="text-xs font-medium data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-sm rounded-md px-2 h-full transition-all"
+              className="text-xs font-medium text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm rounded-lg px-2 h-full transition-all hover:text-foreground"
             >
               Past
             </TabsTrigger>
@@ -150,7 +155,7 @@ export function ClinicalSidebar() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden flex flex-col bg-slate-50/50">
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col bg-background/95">
         {loading ? (
              <div className="flex-1 flex items-center justify-center">
                 <div className="flex flex-col items-center gap-2">
@@ -159,13 +164,13 @@ export function ClinicalSidebar() {
                 </div>
              </div>
         ) : displayItems.length > 0 ? (
-          <ScrollArea className="flex-1">
-            <div className="px-3 pb-8 pt-1">
+          <ScrollArea className="h-full flex-1">
+            <div className="px-3 pb-4 pt-1">
               {displayItems.map((item) => {
                 if (item.type === 'header') {
                   return (
-                    <div key={item.id} className="sticky top-0 z-10 w-full pt-3 pb-1.5 px-1 shadow-[0_1px_0_0_rgba(0,0,0,0.02)] backdrop-blur-sm bg-slate-50/80">
-                       <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      <div key={item.id} className="sticky top-0 z-10 w-full pt-3 pb-1.5 px-1 shadow-[0_1px_0_0_rgba(0,0,0,0.02)] backdrop-blur-sm bg-background/95">
+                        <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                         {item.date}
                         </h3>
                     </div>
@@ -182,43 +187,57 @@ export function ClinicalSidebar() {
                       onClick={() => handleSelectSession(session.id)}
                       className={cn(
                         "mt-2 mb-1 relative flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 border group",
-                        "bg-white hover:border-blue-200 hover:shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)]",
-                        "border-slate-100 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                        isCompleted
+                          ? "bg-muted/35 border-muted text-muted-foreground/80 hover:bg-muted/45"
+                          : "bg-background/95 border-sidebar-border/70 hover:bg-background hover:border-primary/35 hover:shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)]",
+                        "shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
                       )}
                     >
                         {/* Avatar / Initials */}
-                      <div className={cn(
-                        "h-8 w-8 rounded-full flex items-center justify-center shrink-0 text-[10px] font-bold mt-0.5 transition-colors",
-                         isCompleted ? "bg-green-50 text-green-600 border border-green-100" : "bg-blue-50 text-blue-600 border border-blue-100 group-hover:bg-blue-100/50"
+                      <Avatar className={cn(
+                        "h-8 w-8 shrink-0 mt-0.5 border transition-colors",
+                        isCompleted ? "border-muted-foreground/20" : "border-border/70 group-hover:border-primary/40"
                       )}>
-                        {session.initials}
-                      </div>
+                        <AvatarImage src={session.patientImageUrl || undefined} alt={session.patientName} />
+                        <AvatarFallback className="bg-muted text-muted-foreground">
+                          {session.patientImageUrl ? session.initials : <User className="h-3.5 w-3.5" />}
+                        </AvatarFallback>
+                      </Avatar>
 
                       <div className="flex-1 min-w-0 flex flex-col gap-0.5">
                         {/* Reason / Title - Primary */}
                         <p className={cn(
                             "text-sm font-semibold leading-tight truncate transition-colors",
-                            isCompleted ? "text-slate-600" : "text-slate-800 group-hover:text-blue-700"
+                          isCompleted ? "text-muted-foreground" : "text-foreground group-hover:text-primary"
                         )}>
                             {session.title}
                         </p>
                         
                         {/* Patient Name - Subtext */}
-                        <p className="text-[11px] text-slate-500 truncate font-medium">
-                            {session.patientName}
-                        </p> 
+                        <div className={cn(
+                          "flex items-center gap-1 text-[11px] font-medium min-w-0",
+                          isCompleted ? "text-muted-foreground/80" : "text-muted-foreground"
+                        )}>
+                          <UserRound className="h-3 w-3 shrink-0" />
+                          <span className="truncate">{session.patientName}</span>
+                        </div>
 
                         {/* Status/Time Row */}
                         <div className="flex items-center justify-between mt-2">
-                             <div className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-md font-mono font-medium border border-slate-200/60">
+                                <div className={cn(
+                                  "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md font-medium tracking-wide tabular-nums border",
+                                  isCompleted
+                                    ? "bg-muted/60 text-muted-foreground border-muted"
+                                    : "bg-muted/85 text-foreground/80 border-border/70"
+                                )}>
+                                  <Clock3 className="h-3 w-3" />
                                 {session.time}
                              </div>
                              
                              {/* Detailed Status Indicator */}
                              {isCompleted ? (
-                                <div className="flex items-center gap-1 text-[10px] text-green-600 font-medium bg-green-50/50 px-1.5 py-0.5 rounded-full border border-green-100/50">
-                                   <span className="w-1 h-1 rounded-full bg-green-500" />
-                                   Done
+                                <div className="flex items-center gap-1 text-[10px] text-green-600 font-medium bg-green-50/50 px-1.5 py-0.5 rounded-full border border-green-100/60">
+                                  <Check className="h-3 w-3" />
                                 </div>
                              ) : isCanceled ? (
                                 <div className="flex items-center gap-1 text-[10px] text-red-600 font-medium bg-red-50/50 px-1.5 py-0.5 rounded-full border border-red-100/50">
@@ -238,11 +257,11 @@ export function ClinicalSidebar() {
           </ScrollArea>
         ) : (
              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
-                 <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center mb-3">
-                    <Search className="h-5 w-5 text-slate-400" />
+               <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-3">
+                <Search className="h-5 w-5 text-muted-foreground" />
                  </div>
-                 <p className="text-sm font-medium text-slate-600">No appointments</p>
-                 <p className="text-xs text-slate-400 mt-1">Check back later or try a different search.</p>
+               <p className="text-sm font-medium text-foreground/80">No appointments</p>
+               <p className="text-xs text-muted-foreground mt-1">Check back later or try a different search.</p>
              </div>
         )}
       </div>

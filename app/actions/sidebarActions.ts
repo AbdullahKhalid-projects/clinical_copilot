@@ -1,13 +1,14 @@
 'use server'
 
 import { prisma } from "@/lib/prisma"
-import { currentUser } from "@clerk/nextjs/server"
+import { currentUser, clerkClient } from "@clerk/nextjs/server"
 import { format } from "date-fns"
 
 export type SidebarAppointment = {
   id: string
   title: string      // Reason
   patientName: string
+  patientImageUrl: string | null
   time: string
   date: string       // Used for grouping headers
   initials: string
@@ -18,6 +19,8 @@ export type SidebarAppointment = {
 export async function getSidebarAppointments() {
   const user = await currentUser()
   if (!user) return { upcoming: [], past: [] }
+
+  const clerk = await clerkClient()
 
   const dbUser = await prisma.user.findUnique({
     where: { clerkId: user.id },
@@ -40,10 +43,34 @@ export async function getSidebarAppointments() {
     },
     orderBy: {
       date: 'desc' // Default soft sort, we will split manually
-    }
+    },
+    take: 20
   })
 
   const now = new Date()
+
+  const uniquePatientClerkIds = Array.from(
+    new Set(
+      appointments
+        .map((apt) => apt.patient.user.clerkId)
+        .filter((id): id is string => Boolean(id))
+    )
+  )
+
+  const patientImageMap = new Map<string, string>()
+
+  await Promise.all(
+    uniquePatientClerkIds.map(async (clerkId) => {
+      try {
+        const clerkUser = await clerk.users.getUser(clerkId)
+        if (clerkUser.imageUrl) {
+          patientImageMap.set(clerkId, clerkUser.imageUrl)
+        }
+      } catch (error) {
+        console.error("Failed to fetch patient image from Clerk", clerkId, error)
+      }
+    })
+  )
 
   // Transform to view model
   const viewModels: SidebarAppointment[] = appointments.map(apt => {
@@ -54,6 +81,7 @@ export async function getSidebarAppointments() {
       id: apt.id,
       title: apt.reason || "General Consultation",
       patientName: pName,
+      patientImageUrl: patientImageMap.get(apt.patient.user.clerkId) ?? null,
       time: format(apt.date, "h:mm a"), // e.g. 2:30 PM
       date: format(apt.date, "dd/MM/yyyy"), // e.g. 14/02/2026 used for grouping headers
       initials,
