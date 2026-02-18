@@ -76,6 +76,7 @@ const patientNavItems: NavItem[] = [
   { label: "Labs & Imaging", href: "/patient/labs", icon: FlaskConical },
   { label: "My Notes", href: "/patient/notes", icon: StickyNote },
   { label: "Medications", href: "/patient/medications", icon: Pill },
+  { label: "Reports", href: "/patient/reports", icon: FileText },
 ];
 
 // Doctor Group 1: Menu
@@ -119,139 +120,139 @@ export function Sidebar({ role }: SidebarProps) {
   }, [pathname]);
 
   // Define groups based on role
-  const navGroups = role === "doctor" 
+  const navGroups = role === "doctor"
     ? [
-        { label: "Menu", items: doctorMenuItems },
-        { label: "My Space", items: doctorSpaceItems }
-      ]
+      { label: "Menu", items: doctorMenuItems },
+      { label: "My Space", items: doctorSpaceItems }
+    ]
     : [
-        { label: "Menu", items: patientNavItems }
-      ];
+      { label: "Menu", items: patientNavItems }
+    ];
 
   return (
     <>
-    <ShadcnSidebar collapsible="icon" className="border-r bg-sidebar">
-      <SidebarHeader className="h-fit gap-0 p-2">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            {/* Header Box */}
-            <div className="flex w-full items-center justify-between rounded-lg bg-yellow-300 p-3 transition-all duration-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-2">
-              <span className="whitespace-nowrap text-lg font-black tracking-tight text-black group-data-[collapsible=icon]:hidden w-full text-center">
-                Shifa Scribe
-              </span>
+      <ShadcnSidebar collapsible="icon" className="border-r bg-sidebar">
+        <SidebarHeader className="h-fit gap-0 p-2">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              {/* Header Box */}
+              <div className="flex w-full items-center justify-between rounded-lg bg-yellow-300 p-3 transition-all duration-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-2">
+                <span className="whitespace-nowrap text-lg font-black tracking-tight text-black group-data-[collapsible=icon]:hidden w-full text-center">
+                  Shifa Scribe
+                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <SidebarTrigger className="text-black hover:bg-black/10 shrink-0" />
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Toggle Sidebar</TooltipContent>
+                </Tooltip>
+              </div>
+            </SidebarMenuItem>
+          </SidebarMenu>
+
+          <SidebarMenu className="mt-3">
+            {/* Button Container */}
+            <SidebarMenuItem className="px-1-4">
+              <Button
+                className="w-full justify-center gap-2 bg-primary text-primary-foreground hover:bg-black hover:text-white group-data-[collapsible=icon]:hidden shadow-md h-10 font-semibold"
+              >
+                <Plus className="h-4 w-4" />
+                <span>New Appointment</span>
+              </Button>
+
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <SidebarTrigger className="text-black hover:bg-black/10 shrink-0" />
+                  <Button
+                    className="h-9 w-9 p-0 hidden group-data-[collapsible=icon]:flex mx-auto bg-primary text-primary-foreground hover:bg-black hover:text-white rounded-lg"
+                    size="icon"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </Button>
                 </TooltipTrigger>
-                <TooltipContent side="right">Toggle Sidebar</TooltipContent>
+                <TooltipContent side="right">New Appointment</TooltipContent>
               </Tooltip>
-            </div>
-          </SidebarMenuItem>
-        </SidebarMenu>
-        
-        <SidebarMenu className="mt-3">
-            {/* Button Container */}
-            <SidebarMenuItem className="px-1-4"> 
-               <Button 
-                   className="w-full justify-center gap-2 bg-primary text-primary-foreground hover:bg-black hover:text-white group-data-[collapsible=icon]:hidden shadow-md h-10 font-semibold" 
-               >
-                    <Plus className="h-4 w-4" /> 
-                    <span>New Appointment</span>
-               </Button>
-               
-               <Tooltip>
-                 <TooltipTrigger asChild>
-                    <Button 
-                        className="h-9 w-9 p-0 hidden group-data-[collapsible=icon]:flex mx-auto bg-primary text-primary-foreground hover:bg-black hover:text-white rounded-lg" 
-                        size="icon"
-                    >
-                        <Plus className="h-5 w-5" />
-                    </Button>
-                 </TooltipTrigger>
-                 <TooltipContent side="right">New Appointment</TooltipContent>
-               </Tooltip>
             </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
+          </SidebarMenu>
+        </SidebarHeader>
 
-      <SidebarContent>
-        {navGroups.map((group) => (
-          <SidebarGroup key={group.label}>
-            <SidebarGroupLabel className="uppercase tracking-wider text-xs font-semibold text-muted-foreground/70">
-              {group.label}
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {group.items.map((item) => {
-                  const isClinicalSession = item.label === "Clinical Session";
-                  // Active state is driven by path, except for Clinical Session which is just a trigger
-                  const isActive = isClinicalSession ? false : pathname === item.href;
-                  
-                  return (
-                    <SidebarMenuItem key={item.label}>
-                      <SidebarMenuButton 
-                        asChild={!isClinicalSession} 
-                        isActive={isActive}
-                        tooltip={item.label}
-                        className={`
+        <SidebarContent>
+          {navGroups.map((group) => (
+            <SidebarGroup key={group.label}>
+              <SidebarGroupLabel className="uppercase tracking-wider text-xs font-semibold text-muted-foreground/70">
+                {group.label}
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {group.items.map((item) => {
+                    const isClinicalSession = item.label === "Clinical Session";
+                    // Active state is driven by path, except for Clinical Session which is just a trigger
+                    const isActive = isClinicalSession ? false : pathname === item.href;
+
+                    return (
+                      <SidebarMenuItem key={item.label}>
+                        <SidebarMenuButton
+                          asChild={!isClinicalSession}
+                          isActive={isActive}
+                          tooltip={item.label}
+                          className={`
                           transition-all duration-200 
                           ${isActive ? "font-medium bg-stone-100 text-primary border-l-4 border-primary rounded-r-lg rounded-l-none pl-3" : "text-muted-foreground pl-4"}
                           ${isClinicalSession ? "cursor-pointer hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" : ""}
                         `}
-                        onClick={(e) => {
-                           if (isClinicalSession) {
-                               e.preventDefault();
-                               setIsClinicalSidebarOpen(!isClinicalSidebarOpen);
-                           } else {
-                               setIsClinicalSidebarOpen(false);
-                           }
-                        }}
-                      >
-                         {isClinicalSession ? (
+                          onClick={(e) => {
+                            if (isClinicalSession) {
+                              e.preventDefault();
+                              setIsClinicalSidebarOpen(!isClinicalSidebarOpen);
+                            } else {
+                              setIsClinicalSidebarOpen(false);
+                            }
+                          }}
+                        >
+                          {isClinicalSession ? (
                             <>
-                                <item.icon className={isActive ? "text-primary" : "text-muted-foreground"} />
-                                <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">{item.label}</span>
-                                <ChevronRight 
-                                  className={`ml-auto h-4 w-4 transition-transform duration-200 group-data-[collapsible=icon]:hidden ${isClinicalSidebarOpen ? "rotate-180" : ""}`} 
-                                />
+                              <item.icon className={isActive ? "text-primary" : "text-muted-foreground"} />
+                              <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">{item.label}</span>
+                              <ChevronRight
+                                className={`ml-auto h-4 w-4 transition-transform duration-200 group-data-[collapsible=icon]:hidden ${isClinicalSidebarOpen ? "rotate-180" : ""}`}
+                              />
                             </>
-                         ) : (
+                          ) : (
                             <Link href={item.href}>
-                                <item.icon className={isActive ? "text-primary" : "text-muted-foreground"} />
-                                <span>{item.label}</span>
+                              <item.icon className={isActive ? "text-primary" : "text-muted-foreground"} />
+                              <span>{item.label}</span>
                             </Link>
-                         )}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
-      </SidebarContent>
+                          )}
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          ))}
+        </SidebarContent>
 
-      <SidebarSeparator className="mx-0" />
+        <SidebarSeparator className="mx-0" />
 
-      <SidebarFooter className="p-2">
-        <SidebarMenu>
+        <SidebarFooter className="p-2">
+          <SidebarMenu>
             {role === "doctor" && bottomItems.map((item) => (
-                <SidebarMenuItem key={item.label}>
-                    <SidebarMenuButton asChild tooltip={item.label} className="pl-4 text-muted-foreground">
-                        <Link href={item.href}>
-                            <item.icon />
-                            <span>{item.label}</span>
-                        </Link>
-                    </SidebarMenuButton>
-                </SidebarMenuItem>
+              <SidebarMenuItem key={item.label}>
+                <SidebarMenuButton asChild tooltip={item.label} className="pl-4 text-muted-foreground">
+                  <Link href={item.href}>
+                    <item.icon />
+                    <span>{item.label}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             ))}
             <SidebarMenuItem>
-                <SidebarMenuButton tooltip="Help" className="pl-4 text-muted-foreground">
-                    <HelpCircle />
-                    <span>Help</span>
-                </SidebarMenuButton>
+              <SidebarMenuButton tooltip="Help" className="pl-4 text-muted-foreground">
+                <HelpCircle />
+                <span>Help</span>
+              </SidebarMenuButton>
             </SidebarMenuItem>
-            
+
             <div className="h-0.5" />
 
             <SidebarMenuItem>
@@ -322,22 +323,21 @@ export function Sidebar({ role }: SidebarProps) {
                 </SidebarMenuButton>
               )}
             </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
-      <SidebarRail />
-    </ShadcnSidebar>
-    {mounted && (
-      <div
-        className={`overflow-hidden transition-all duration-300 ease-out ${
-          isClinicalSidebarOpen
-            ? "w-[17rem] translate-x-0 opacity-100"
-            : "w-0 translate-x-2 opacity-0 pointer-events-none"
-        }`}
-        aria-hidden={!isClinicalSidebarOpen}
-      >
-        <ClinicalSidebar />
-      </div>
-    )}
+          </SidebarMenu>
+        </SidebarFooter>
+        <SidebarRail />
+      </ShadcnSidebar>
+      {mounted && (
+        <div
+          className={`overflow-hidden transition-all duration-300 ease-out ${isClinicalSidebarOpen
+              ? "w-[17rem] translate-x-0 opacity-100"
+              : "w-0 translate-x-2 opacity-0 pointer-events-none"
+            }`}
+          aria-hidden={!isClinicalSidebarOpen}
+        >
+          <ClinicalSidebar />
+        </div>
+      )}
     </>
   );
 }

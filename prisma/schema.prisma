@@ -7,26 +7,163 @@ datasource db {
   provider = "postgresql"
 }
 
-// These are the roles
+
+
+// --------------------------------------
+// ENUMS
+// --------------------------------------
+
 enum Role {
-  ADMIN
+  ADMIN   // Standardized from ADMIN/ADMINISTRATOR
   DOCTOR
   PATIENT
 }
 
-// User Schema
+enum DocumentType {
+  RAG
+  PATIENT
+}
+
+enum RagSubtype {
+  MEDICINE
+  DISEASE
+}
+
+enum PatientDataType {
+  REPORT
+  COMMENT
+}
+
+// --------------------------------------
+// CORE USER MODEL (Merged)
+// --------------------------------------
+
 model User {
-  id        String   @id @default(uuid())
-  clerkId   String   @unique // <--- ADD THIS. This matches the ID inside Clerk.
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
   email     String   @unique
   name      String?
   role      Role     @default(PATIENT)
+  
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  // Relations
-  doctorProfile  DoctorProfile?
-  patientProfile PatientProfile?
+  // --- Relations: RAG / Document System (Schema 1) ---
+  documents           Document[]
+  medicalReports      MedicalReport[]
+  medicalReportValues MedicalReportValue[]
+
+  // --- Relations: Hospital Management System (Schema 2) ---
+  doctorProfile       DoctorProfile?
+  patientProfile      PatientProfile?
 }
+
+// --------------------------------------
+// RAG & DOCUMENT SYSTEM (Schema 1)
+// --------------------------------------
+
+model Document {
+  id              String       @id @default(cuid())
+  title           String
+  content         String       @db.Text
+  pdfUrl          String?
+  type            DocumentType @default(RAG)
+  ragSubtype      RagSubtype?
+  patientDataType PatientDataType?
+  isIngested      Boolean      @default(false)
+  
+  // Relation to User
+  userId          String?
+  user            User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // RAG document chunks stored in Pinecone
+  ragChunks       RagChunk[]
+  parentChunks    ParentChunk[]
+  medicalReports  MedicalReport[]
+}
+
+// Stores parent chunk text to avoid redundancy in Pinecone metadata
+model ParentChunk {
+  id              String   @id @default(cuid())
+  documentId      String
+  document        Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  parentIndex     Int
+  parentText      String   @db.Text
+  
+  createdAt       DateTime @default(now())
+  
+  // All child chunks reference this parent
+  ragChunks       RagChunk[]
+  
+  @@unique([documentId, parentIndex])
+}
+
+model RagChunk {
+  id              String   @id @default(cuid())
+  documentId      String
+  document        Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  
+  // Reference to parent chunk instead of storing parent text directly
+  parentChunkId   String
+  parentChunk     ParentChunk @relation(fields: [parentChunkId], references: [id], onDelete: Cascade)
+  
+  chunkIndex      Int
+  chunkText       String   @db.Text
+  pineconeId      String   @unique
+  
+  createdAt       DateTime @default(now())
+}
+
+// Model for storing medical report key-value pairs
+model MedicalReport {
+  id              String   @id @default(cuid())
+  documentId      String
+  document        Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  markdown        String?
+  reportURL       String?  // URL to the generated PDF report
+  // Report metadata
+  reportDate      DateTime?
+  hospitalName    String?
+  
+  // User relation
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Key-value pairs for the report
+  reportValues    MedicalReportValue[]
+}
+
+// Model for storing individual key-value pairs from medical reports
+model MedicalReportValue {
+  id              String   @id @default(cuid())
+  reportId        String
+  report          MedicalReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  
+  // User relation
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Key-value data (all uppercase for standardization)
+  key             String       // e.g., "VITAMIN D2"
+  value           String       // e.g., "1.15"
+  unit            String?      // e.g., "NG/ML"
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([reportId])
+  @@index([key])
+  @@index([userId])
+}
+
+// --------------------------------------
+// HOSPITAL MANAGEMENT SYSTEM (Schema 2)
+// --------------------------------------
 
 // Doctor Schema
 model DoctorProfile {
@@ -54,7 +191,7 @@ model PatientProfile {
 
   // Medical Stats
   bloodType      String?
-  height         String? // Stored as string to match "5'11"" or "180cm" flexible for now, or Float for calc
+  height         String? // Stored as string to match "5'11"" or "180cm" flexible for now
   weight         String? // Stored as string "160 lbs"
   
   // Clinical Data
@@ -89,7 +226,7 @@ model Prescription {
   doctor      DoctorProfile? @relation(fields: [doctorId], references: [id])
 }
 
-// Health Metrics for Trends
+// Health Metrics for Trends (Manually added or device synced)
 model HealthMetric {
   id          String   @id @default(uuid())
   type        String   // "Blood Pressure", "Heart Rate", "Weight"
@@ -134,17 +271,17 @@ model Appointment {
   reason    String?
   notes     String?
   
-  // New Feature: Clinical Copilot Fields
+  // Clinical Copilot Fields
   recordingUrl   String?  // URL to stored audio file
   transcript     Json?    // Structured transcript: [{ speaker: "doctor" | "patient", text: "...", timestamp: 0.5 }]
   
-  // SOAP Notes - Storing as JSON allows flexibility (e.g. { subjective: "...", objective: "...", assessment: "...", plan: "..." })
+  // SOAP Notes - Storing as JSON allows flexibility 
   soapNote       Json?    
   
   // Generated PDF
   soapNoteUrl    String?  // URL to the generated PDF of the SOAP note
 
-  // Metadata for AI processing status (optional but helpful)
+  // Metadata for AI processing status
   aiStatus       String?  // "PROCESSING", "COMPLETED", "FAILED"
 
   doctorId  String?
