@@ -172,10 +172,10 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                         <h1 className="text-lg font-semibold text-foreground leading-none truncate">
               {patientName}
             </h1>
-                        <Badge variant="secondary" className="shrink-0">Patient</Badge>
+                                                <Badge variant="outline" className="shrink-0 border-stone-300 bg-stone-100 text-stone-700">Patient</Badge>
                         </div>
                         <span className="text-sm text-muted-foreground mt-1 font-medium truncate">
-              {reason}
+                            Reason: {reason}
             </span>
           </div>
                         </div>
@@ -216,18 +216,15 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                             <Clock3 className="h-3.5 w-3.5" />
                             {format(appointmentDate, "hh:mm a")}
                         </Badge>
-                        <Badge variant="secondary" className="py-1">
-                            Reason: {reason}
-                        </Badge>
                         {recordingUrl && (
-                            <Badge className="gap-1.5 py-1 pr-1.5 bg-green-600 text-white hover:bg-green-700">
+                            <Badge className="gap-1.5 py-1 pr-1.5 bg-[#CCFF0B] text-black border border-[#B8E609] hover:bg-[#B8E609]">
                                 <CheckCircle2 className="h-3.5 w-3.5" />
                                 Recording Attached
                                 <Button
                                     type="button"
                                     variant="ghost"
                                     size="icon"
-                                    className="h-5 w-5 p-0 rounded-full text-white/85 hover:text-white hover:bg-transparent"
+                                    className="h-5 w-5 p-0 rounded-full text-black/75 hover:text-black hover:bg-transparent"
                                     onClick={() => setIsRecordingInfoOpen(true)}
                                     aria-label="Recording info"
                                     title="Recording info"
@@ -251,7 +248,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                         type="button"
                                         variant="ghost"
                                         onClick={() => setActiveMainTab("context")}
-                                        className="group rounded-lg px-3 h-9 text-foreground hover:bg-muted"
+                                        className={`group rounded-lg px-3 h-9 border transition-colors ${activeMainTab === "context" ? "bg-muted text-foreground border-transparent" : "text-foreground border-transparent hover:bg-muted"}`}
                                     >
                                         <SlidersHorizontal className={activeMainTab === "context" ? "h-4 w-4 text-emerald-600" : "h-4 w-4 text-muted-foreground group-hover:text-emerald-500"} />
                                         Context
@@ -261,7 +258,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                         type="button"
                                         variant="ghost"
                                         onClick={() => setActiveMainTab("transcript")}
-                                        className="group rounded-lg px-3 h-9 text-foreground hover:bg-muted"
+                                        className={`group rounded-lg px-3 h-9 border transition-colors ${activeMainTab === "transcript" ? "bg-muted text-foreground border-transparent" : "text-foreground border-transparent hover:bg-muted"}`}
                                     >
                                         <AudioLines className={activeMainTab === "transcript" ? "h-4 w-4 text-violet-600" : "h-4 w-4 text-muted-foreground group-hover:text-violet-500"} />
                                         Transcript
@@ -271,7 +268,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                         type="button"
                                         variant="ghost"
                                         onClick={() => setActiveMainTab("note")}
-                                        className="group rounded-lg px-3 h-9 text-foreground hover:bg-muted"
+                                        className={`group rounded-lg px-3 h-9 border transition-colors ${activeMainTab === "note" ? "bg-muted text-foreground border-transparent" : "text-foreground border-transparent hover:bg-muted"}`}
                                     >
                                         <PenLine className={activeMainTab === "note" ? "h-4 w-4 text-blue-600" : "h-4 w-4 text-muted-foreground group-hover:text-blue-500"} />
                                         Note
@@ -332,7 +329,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                         <div className="mt-8 p-6 rounded-lg border bg-background/50 backdrop-blur shadow-sm max-w-sm w-full">
                                                 {activeMainTab === "context" && (
                                                     <div className="flex flex-col items-center gap-3">
-                                                        <Button className="w-full bg-green-600 hover:bg-green-700 text-white gap-2" size="lg">
+                                                        <Button className="w-full bg-[#CCFF0B] hover:bg-[#B8E609] text-black gap-2" size="lg">
                                                             <Mic className="w-5 h-5" />
                                                             Start transcribing
                                                         </Button>

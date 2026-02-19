@@ -166,7 +166,7 @@ export function Sidebar({ role }: SidebarProps) {
             {/* Button Container */}
             <SidebarMenuItem className="px-1-4">
               <Button
-                className="w-full justify-center gap-2 bg-primary text-primary-foreground hover:bg-black hover:text-white group-data-[collapsible=icon]:hidden shadow-md h-10 font-semibold"
+                className="w-full justify-center gap-2 bg-black text-white hover:bg-zinc-800 hover:text-white group-data-[collapsible=icon]:hidden shadow-md h-10 font-semibold"
               >
                 <Plus className="h-4 w-4" />
                 <span>New Appointment</span>
@@ -175,7 +175,7 @@ export function Sidebar({ role }: SidebarProps) {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    className="h-9 w-9 p-0 hidden group-data-[collapsible=icon]:flex mx-auto bg-primary text-primary-foreground hover:bg-black hover:text-white rounded-lg"
+                    className="h-9 w-9 p-0 hidden group-data-[collapsible=icon]:flex mx-auto bg-black text-white hover:bg-zinc-800 hover:text-white rounded-lg"
                     size="icon"
                   >
                     <Plus className="h-5 w-5" />

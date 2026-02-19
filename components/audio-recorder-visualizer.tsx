@@ -326,7 +326,7 @@ export const AudioRecorderWithVisualizer = ({
             >
                 <Button 
                     className={cn(
-                        "w-full h-full gap-2 font-medium shadow-none rounded-md",
+                    "w-full h-full gap-2 font-medium shadow-none rounded-md bg-[#CCFF0B] text-black hover:bg-[#B8E609]",
                         // Using default primary/secondary variants or specific classes to match theme
                     )}
                     variant="default" // Use default variant (usually black/primary color)

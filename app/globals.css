@@ -36,8 +36,8 @@ H (Hue): What color is it on the color wheel?*/
   --destructive: oklch(0.55 0.2 25);
   --destructive-foreground: oklch(1 0 0);
   
-  --border: oklch(0.92 0.01 50);
-  --input: oklch(0.92 0.01 50);
+  --border: oklch(0.78 0.01 50);
+  --input: oklch(0.78 0.01 50);
   --ring: oklch(0.30 0.08 30);
   
   --radius: 0.5rem;
@@ -48,7 +48,7 @@ H (Hue): What color is it on the color wheel?*/
   --sidebar-primary-foreground: oklch(0.98 0.005 60);
   --sidebar-accent: oklch(0.93 0.01 50); /* Hover state */
   --sidebar-accent-foreground: oklch(0.30 0.08 30);
-  --sidebar-border: oklch(0.92 0.01 50);
+  --sidebar-border: oklch(0.78 0.01 50);
   --sidebar-ring: oklch(0.30 0.08 30);
 }
 
@@ -69,8 +69,8 @@ H (Hue): What color is it on the color wheel?*/
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.396 0.141 25.723);
   --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
+  --border: oklch(0.45 0 0);
+  --input: oklch(0.45 0 0);
   --ring: oklch(0.439 0 0);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
@@ -83,7 +83,7 @@ H (Hue): What color is it on the color wheel?*/
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-border: oklch(0.45 0 0);
   --sidebar-ring: oklch(0.439 0 0);
 }
 
