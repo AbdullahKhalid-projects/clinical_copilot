@@ -68,13 +68,18 @@ interface NavItem {
   icon: React.ElementType;
 }
 
-// Patient Items (Kept as one group for now)
-const patientNavItems: NavItem[] = [
+const patientMenuItems: NavItem[] = [
   { label: "Dashboard", href: "/patient/dashboard", icon: LayoutDashboard },
+  { label: "My Notes", href: "/patient/notes", icon: StickyNote },
+];
+
+const patientAppointmentItems: NavItem[] = [
   { label: "Visit Summaries", href: "/patient/visit-summaries", icon: ClipboardList },
   { label: "Transcripts", href: "/patient/transcripts", icon: MessageSquare },
+];
+
+const patientSpaceItems: NavItem[] = [
   { label: "Labs & Imaging", href: "/patient/labs", icon: FlaskConical },
-  { label: "My Notes", href: "/patient/notes", icon: StickyNote },
   { label: "Medications", href: "/patient/medications", icon: Pill },
   { label: "Reports", href: "/patient/reports", icon: FileText },
 ];
@@ -92,8 +97,12 @@ const doctorSpaceItems: NavItem[] = [
   { label: "Post-Visit Editor", href: "/doctor/post-visit", icon: FileText },
 ];
 
-const bottomItems: NavItem[] = [
+const doctorBottomItems: NavItem[] = [
   { label: "Settings", href: "/doctor/settings", icon: Settings },
+];
+
+const patientBottomItems: NavItem[] = [
+  { label: "Settings", href: "/patient/settings", icon: Settings },
 ];
 
 interface SidebarProps {
@@ -107,6 +116,7 @@ export function Sidebar({ role }: SidebarProps) {
   const { isMobile } = useSidebar();
   const [mounted, setMounted] = React.useState(false);
   const [isClinicalSidebarOpen, setIsClinicalSidebarOpen] = React.useState(false);
+  const bottomItems = role === "doctor" ? doctorBottomItems : patientBottomItems;
 
   React.useEffect(() => {
     setMounted(true);
@@ -126,7 +136,9 @@ export function Sidebar({ role }: SidebarProps) {
       { label: "My Space", items: doctorSpaceItems }
     ]
     : [
-      { label: "Menu", items: patientNavItems }
+      { label: "Menu", items: patientMenuItems },
+      { label: "Appointments", items: patientAppointmentItems },
+      { label: "My Space", items: patientSpaceItems }
     ];
 
   return (
@@ -236,7 +248,7 @@ export function Sidebar({ role }: SidebarProps) {
 
         <SidebarFooter className="p-2">
           <SidebarMenu>
-            {role === "doctor" && bottomItems.map((item) => (
+            {bottomItems.map((item) => (
               <SidebarMenuItem key={item.label}>
                 <SidebarMenuButton asChild tooltip={item.label} className="pl-4 text-muted-foreground">
                   <Link href={item.href}>
@@ -253,7 +265,7 @@ export function Sidebar({ role }: SidebarProps) {
               </SidebarMenuButton>
             </SidebarMenuItem>
 
-            <div className="h-0.5" />
+            <SidebarSeparator className="mx-1 my-1" />
 
             <SidebarMenuItem>
               {mounted ? (
