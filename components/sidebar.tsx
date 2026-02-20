@@ -244,7 +244,7 @@ export function Sidebar({ role }: SidebarProps) {
           ))}
         </SidebarContent>
 
-        <SidebarSeparator className="mx-0" />
+        <SidebarSeparator className="mx-0 bg-sidebar-border/45" />
 
         <SidebarFooter className="p-2">
           <SidebarMenu>
@@ -264,8 +264,6 @@ export function Sidebar({ role }: SidebarProps) {
                 <span>Help</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
-
-            <SidebarSeparator className="mx-1 my-1" />
 
             <SidebarMenuItem>
               {mounted ? (
