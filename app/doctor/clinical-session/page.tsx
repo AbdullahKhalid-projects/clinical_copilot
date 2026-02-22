@@ -135,7 +135,6 @@ function ClinicalSessionContent() {
               {selectedPatient && (
                 <>
                   <Avatar className="h-10 w-10 border">
-                    <AvatarImage src={selectedPatient.imageUrl} alt={selectedPatient.name} />
                     <AvatarFallback>{selectedPatient.initials}</AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col min-w-0">
