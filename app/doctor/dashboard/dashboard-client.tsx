@@ -7,6 +7,8 @@ import {
   Play,
   Stethoscope,
   Clock,
+  LayoutDashboard,
+  Users,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -55,31 +57,54 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
   const { doctor, todaysOverview, appointments } = initialData;
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-foreground">Doctor Dashboard</h1>
-
-      {/* Doctor Profile Header */}
-      <Card className="bg-primary text-primary-foreground overflow-hidden">
-        <CardContent className="p-6">
-          <div className="flex items-center gap-6">
-            <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center text-3xl font-semibold">
-              {doctor.initials}
+    <div className="h-full flex-1 flex-col space-y-0 md:flex">
+      <header className="px-4 sm:px-5 py-3 border-b-2 border-border bg-background/95 backdrop-blur z-10">
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-10 w-10 shrink-0 rounded-md border-2 border-black bg-yellow-300 flex items-center justify-center">
+                <LayoutDashboard className="h-5 w-5 text-black stroke-2" />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">
+                    Doctor Dashboard
+                  </h1>
+                  <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">Overview</Badge>
+                </div>
+                <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
+                  Welcome back, {doctor.name}
+                </span>
+              </div>
             </div>
-            <div>
-              <h2 className="text-2xl font-bold">{doctor.name}</h2>
-              <p className="text-primary-foreground/80">{doctor.specialty}</p>
-              <p className="text-primary-foreground/80">{doctor.title}</p>
-              <Badge className="mt-2 bg-white/20 text-primary-foreground hover:bg-white/30">
-                <Stethoscope className="w-3 h-3 mr-1" />
-                {doctor.licenseNumber}
-              </Badge>
+            <div className="flex items-center space-x-2">
+              <Button onClick={handleStartSession} className="bg-[#3e2b2b] hover:bg-[#2e1b1b] text-white">
+                <Play className="mr-2 h-4 w-4" /> Start Session
+              </Button>
             </div>
           </div>
-        </CardContent>
-      </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Column */}
+          <div className="flex flex-wrap items-center gap-1.5 text-sm">
+            <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
+              <Stethoscope className="h-3.5 w-3.5" />
+              <span>{doctor.specialty}</span>
+            </Badge>
+            <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
+              <Users className="h-3.5 w-3.5" />
+              <span className="inline-block text-center tabular-nums">{todaysOverview.totalPatients}</span>
+              <span>Total Patients</span>
+            </Badge>
+            <Badge className="gap-1.5 py-1 px-2.5 border border-green-400 bg-green-200 text-green-900 dark:border-green-700 dark:bg-green-900/35 dark:text-green-200 font-medium">
+              <Calendar className="h-3.5 w-3.5" />
+              {todaysOverview.appointments} Appointments Today
+            </Badge>
+          </div>
+        </div>
+      </header>
+
+      <div className="space-y-6 px-4 sm:px-5 pt-6 pb-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Left Column */}
         <div className="space-y-6">
           {/* Quick Actions */}
           <Card>
@@ -179,6 +204,7 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
             )}
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   );
