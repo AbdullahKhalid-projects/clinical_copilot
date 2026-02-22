@@ -19,6 +19,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import {
   Dialog,
   DialogContent,
@@ -125,35 +126,45 @@ function ClinicalSessionContent() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-0">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          {selectedPatient && (
-            <>
-              <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-lg font-semibold">
-                {selectedPatient.initials}
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-foreground">
-                  Clinical Session
-                </h1>
-                <p className="text-muted-foreground">{selectedPatient.name}</p>
-              </div>
-            </>
-          )}
+      <header className="px-4 sm:px-5 py-3 border-b-2 border-border bg-background/95 backdrop-blur z-10 -mx-6 -mt-6 mb-6">
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              {selectedPatient && (
+                <>
+                  <Avatar className="h-10 w-10 border">
+                    <AvatarImage src={selectedPatient.imageUrl} alt={selectedPatient.name} />
+                    <AvatarFallback>{selectedPatient.initials}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex flex-col min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">
+                        {selectedPatient.name}
+                      </h1>
+                      <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">Patient</Badge>
+                    </div>
+                    <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
+                      Clinical Session
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+            <Button
+              onClick={handleFinalize}
+              className="flex items-center gap-2 bg-primary hover:bg-primary/90"
+            >
+              <Check className="w-4 h-4" />
+              Finalize and Sign
+            </Button>
+          </div>
         </div>
-        <Button
-          onClick={handleFinalize}
-          className="flex items-center gap-2 bg-primary hover:bg-primary/90"
-        >
-          <Check className="w-4 h-4" />
-          Finalize and Sign
-        </Button>
-      </div>
+      </header>
 
       {/* 3-Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-6">
         {/* Column 1 - Recorder */}
         <Card>
           <CardHeader className="pb-2">

@@ -9,7 +9,8 @@ import {
   Calendar as CalendarIcon,
   Check,
   User,
-  UserMinus
+  UserMinus,
+  Users
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
@@ -103,23 +104,52 @@ export default function PatientsClient({ patients }: { patients: Patient[] }) {
 
   const hasFilters = searchQuery || statusFilter || genderFilter || dateFilter;
 
-  return (
-    <div className="h-full flex-1 flex-col space-y-6 px-8 pt-4 pb-8 md:flex">
-      <div className="flex items-center justify-between pb-6 border-b">
-        <div>
-          <h2 className="text-4xl font-bold tracking-tight font-serif text-[#1e1e1e]">Patients</h2>
-          <p className="text-muted-foreground mt-2">
-            View your patients, and their details
-          </p>
-        </div>
-        <div className="flex items-center space-x-2">
-          <Button className="bg-[#3e2b2b] hover:bg-[#2e1b1b] text-white">
-             <Plus className="mr-2 h-4 w-4" /> New patient
-          </Button>
-        </div>
-      </div>
+  const upcomingCount = patients.filter(p => p.status === "Upcoming").length;
+  const totalPatients = patients.length;
 
-      <div className="space-y-4">
+  return (
+    <div className="h-full flex-1 flex-col space-y-0 md:flex">
+      <header className="px-4 sm:px-5 py-3 border-b-2 border-border bg-background/95 backdrop-blur z-10">
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-10 w-10 shrink-0 rounded-md border-2 border-black bg-yellow-300 flex items-center justify-center">
+                <Users className="h-5 w-5 text-black stroke-2" />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">
+                    My Patients
+                  </h1>
+                  <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">Directory</Badge>
+                </div>
+                <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
+                  View your patients, and their details
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              <Button className="bg-[#3e2b2b] hover:bg-[#2e1b1b] text-white">
+                <Plus className="mr-2 h-4 w-4" /> New patient
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 text-sm">
+            <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
+              <Users className="h-3.5 w-3.5" />
+              <span className="inline-block text-center tabular-nums">{totalPatients}</span>
+              <span>Total Patients</span>
+            </Badge>
+            <Badge className="gap-1.5 py-1 px-2.5 border border-green-400 bg-green-200 text-green-900 dark:border-green-700 dark:bg-green-900/35 dark:text-green-200 font-medium">
+              <CalendarIcon className="h-3.5 w-3.5" />
+              {upcomingCount} Upcoming
+            </Badge>
+          </div>
+        </div>
+      </header>
+
+      <div className="space-y-4 px-4 sm:px-5 pt-6 pb-8">
         <div className="flex items-center justify-between">
           <div className="flex flex-1 items-center space-x-2">
             <Input
@@ -152,7 +182,7 @@ export default function PatientsClient({ patients }: { patients: Patient[] }) {
                         <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", statusFilter === "Upcoming" ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
                             <Check className={cn("h-4 w-4")} />
                         </div>
-                        <Badge className="bg-green-500 hover:bg-green-600">Upcoming</Badge>
+                        <Badge className="gap-1.5 py-1 px-2.5 border border-green-400 bg-green-200 text-green-900 dark:border-green-700 dark:bg-green-900/35 dark:text-green-200 font-medium hover:bg-green-300">Upcoming</Badge>
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setStatusFilter("Past")}>
                         <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", statusFilter === "Past" ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
@@ -307,7 +337,7 @@ export default function PatientsClient({ patients }: { patients: Patient[] }) {
                      <TableCell>{patient.gender || "-"}</TableCell>
                     <TableCell>
                         {patient.status === 'Upcoming' ? (
-                            <Badge className="bg-green-500 hover:bg-green-600">
+                            <Badge className="gap-1.5 py-1 px-2.5 border border-green-400 bg-green-200 text-green-900 dark:border-green-700 dark:bg-green-900/35 dark:text-green-200 font-medium hover:bg-green-300">
                                 {patient.status}
                             </Badge>
                         ) : (

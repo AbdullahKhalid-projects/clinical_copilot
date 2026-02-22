@@ -17,6 +17,7 @@ import {
   StopCircle,
   Play,
   FileText,
+  Stethoscope,
   MessageSquare,
     Loader2,
     Clock3,
@@ -156,31 +157,30 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         event.target.value = "";
     };
     return (
-        <div className="flex flex-col h-[calc(100svh-3rem)] overflow-hidden bg-background">
+        <div className="flex flex-col h-[calc(100svh-3rem)] overflow-hidden bg-background space-y-0">
       {/* Header Section */}
-                        <header className="px-5 py-3 border-b bg-background/95 backdrop-blur z-10">
-                                <div className="flex flex-col gap-2.5">
-                                        <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-4 min-w-0">
-                                        <Avatar className="h-10 w-10 border">
-            <AvatarImage src={patientImage} alt={patientName} />
-            <AvatarFallback>{patientInitials}</AvatarFallback>
-          </Avatar>
-          
-                    <div className="flex flex-col min-w-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                        <h1 className="text-lg font-semibold text-foreground leading-none truncate">
-              {patientName}
-            </h1>
-                                                <Badge variant="outline" className="shrink-0 border-stone-300 bg-stone-100 text-stone-700">Patient</Badge>
-                        </div>
-                        <span className="text-sm text-muted-foreground mt-1 font-medium truncate">
-                            Reason: {reason}
-            </span>
-          </div>
-                        </div>
+      <header className="px-4 sm:px-5 py-3 border-b-2 border-border bg-background/95 backdrop-blur z-10">
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <Avatar className="h-10 w-10 border">
+                <AvatarImage src={patientImage} alt={patientName} />
+                <AvatarFallback>{patientInitials}</AvatarFallback>
+              </Avatar>
+              <div className="flex flex-col min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">
+                    {patientName}
+                  </h1>
+                  <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">Patient</Badge>
+                </div>
+                <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
+                  Reason: {reason}
+                </span>
+              </div>
+            </div>
 
-                        <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
                          <Button
                           type="button"
                           variant="ghost"
@@ -208,16 +208,16 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 text-sm">
-                        <Badge variant="outline" className="gap-1.5 py-1">
+                        <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
                             <Calendar className="h-3.5 w-3.5" />
                             {format(appointmentDate, "MMMM dd, yyyy")}
                         </Badge>
-                        <Badge variant="outline" className="gap-1.5 py-1">
+                        <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
                             <Clock3 className="h-3.5 w-3.5" />
                             {format(appointmentDate, "hh:mm a")}
                         </Badge>
                         {recordingUrl && (
-                            <Badge className="gap-1.5 py-1 pr-1.5 bg-[#CCFF0B] text-black border border-[#B8E609] hover:bg-[#B8E609]">
+                            <Badge className="gap-1.5 py-1 pr-1.5 bg-[#CCFF0B] text-black border-2 border-[#B8E609] hover:bg-[#B8E609]">
                                 <CheckCircle2 className="h-3.5 w-3.5" />
                                 Recording Attached
                                 <Button
@@ -239,7 +239,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
   </header>
 
       {/* Main Content */}
-            <main className="flex-1 overflow-hidden p-4">
+            <main className="flex-1 overflow-hidden p-4 pt-6">
                 <div className="max-w-5xl mx-auto flex flex-col h-full gap-2.5 min-h-0">
             {/* Toolbar */}
                         <div className="flex items-center justify-between">
