@@ -9,6 +9,7 @@ datasource db {
 
 
 
+
 // --------------------------------------
 // ENUMS
 // --------------------------------------
@@ -127,6 +128,9 @@ model MedicalReport {
   // Report metadata
   reportDate      DateTime?
   hospitalName    String?
+  passed          Boolean? @default(false)  // Whether all test values are 100% correct
+  fidelityScore   Float?   // Fidelity score indicating pipeline accuracy
+  conclusion      String?  @db.Text         // AI explanation of why validation passed or failed
   
   // User relation
   userId          String
