@@ -21,8 +21,9 @@ import {
   ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useUser, useClerk } from "@clerk/nextjs";
+import { createNewAppointmentSession } from "@/app/actions/doctorActions";
 
 import {
   Sidebar as ShadcnSidebar,
@@ -111,12 +112,33 @@ interface SidebarProps {
 
 export function Sidebar({ role }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const { user } = useUser();
   const { signOut, openUserProfile } = useClerk();
   const { isMobile } = useSidebar();
   const [mounted, setMounted] = React.useState(false);
   const [isClinicalSidebarOpen, setIsClinicalSidebarOpen] = React.useState(false);
+  const [isCreatingAppointment, setIsCreatingAppointment] = React.useState(false);
   const bottomItems = role === "doctor" ? doctorBottomItems : patientBottomItems;
+
+  const handleNewAppointment = async () => {
+    if (role !== "doctor" || isCreatingAppointment) return;
+
+    setIsCreatingAppointment(true);
+    try {
+      const result = await createNewAppointmentSession();
+      if (result.success && result.appointmentId) {
+        router.push(`/doctor/clinical-session/${result.appointmentId}`);
+        return;
+      }
+
+      console.error(result.error || "Failed to create appointment");
+    } catch (error) {
+      console.error("Failed to create new appointment", error);
+    } finally {
+      setIsCreatingAppointment(false);
+    }
+  };
 
   React.useEffect(() => {
     setMounted(true);
@@ -167,6 +189,8 @@ export function Sidebar({ role }: SidebarProps) {
             <SidebarMenuItem className="px-1-4">
               <Button
                 className="w-full justify-center gap-2 bg-black text-white hover:bg-zinc-800 hover:text-white group-data-[collapsible=icon]:hidden shadow-md h-10 font-semibold"
+                onClick={handleNewAppointment}
+                disabled={isCreatingAppointment}
               >
                 <Plus className="h-4 w-4" />
                 <span>New Appointment</span>
@@ -177,6 +201,8 @@ export function Sidebar({ role }: SidebarProps) {
                   <Button
                     className="h-9 w-9 p-0 hidden group-data-[collapsible=icon]:flex mx-auto bg-black text-white hover:bg-zinc-800 hover:text-white rounded-lg"
                     size="icon"
+                    onClick={handleNewAppointment}
+                    disabled={isCreatingAppointment}
                   >
                     <Plus className="h-5 w-5" />
                   </Button>

@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { format } from "date-fns";
+import { format, isValid } from "date-fns";
+import { useRouter } from "next/navigation";
 import { 
   ChevronDown, 
   Mic, 
@@ -9,7 +10,7 @@ import {
   PenLine, 
   Undo, 
   Redo, 
-  Trash2, 
+    Trash, 
   History,
   Mic2,
   Calendar,
@@ -52,6 +53,27 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+    getDoctorPatientsForLinking,
+    linkPatientToAppointment,
+    deleteAppointmentSession,
+    type LinkablePatient,
+} from "../actions";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // Simple Canvas Visualizer Component
 // (Removed as we are using the one in AudioRecorderWithVisualizer component)
@@ -61,21 +83,50 @@ interface ClinicalSessionClientProps {
 }
 
 export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProps) {
+    const [currentAppointment, setCurrentAppointment] = React.useState(appointment);
+    const router = useRouter();
+
   // Mock data for UI placeholders
-  const patientName = appointment.patient?.user?.name || "Unknown Patient";
-  const appointmentDate = new Date(appointment.date);
+    const patientName = currentAppointment.patient?.user?.name || "Link Patient";
+        const parsedAppointmentDate = currentAppointment?.date ? new Date(currentAppointment.date) : null;
+        const appointmentDate = parsedAppointmentDate && isValid(parsedAppointmentDate) ? parsedAppointmentDate : null;
   const patientInitials = patientName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
-  const patientImage = appointment.patientImageUrl;
-  const reason = appointment.reason || "General Consultation";
+    const patientImage = currentAppointment.patientImageUrl;
+    const reason = currentAppointment.reason || "General Consultation";
+    const hasLinkedPatient = Boolean(currentAppointment.patient?.id);
+    const statusLabelMap: Record<string, string> = {
+        UNLINKED: "Unlinked",
+        PENDING: "Pending",
+        CONFIRMED: "Confirmed",
+        IN_PROGRESS: "In Progress",
+        COMPLETED: "Completed",
+        CANCELLED: "Cancelled",
+    };
+    const statusLabel = statusLabelMap[currentAppointment.status] || currentAppointment.status || "Unknown";
+    const statusBadgeClassMap: Record<string, string> = {
+        UNLINKED: "border-amber-300 bg-amber-100/70 text-amber-900",
+        PENDING: "border-zinc-300 bg-zinc-100/80 text-zinc-800",
+        CONFIRMED: "border-sky-300 bg-sky-100/70 text-sky-900",
+        IN_PROGRESS: "border-blue-300 bg-blue-100/70 text-blue-900",
+        COMPLETED: "border-emerald-300 bg-emerald-100/70 text-emerald-900",
+        CANCELLED: "border-red-300 bg-red-100/70 text-red-900",
+    };
+    const statusBadgeClass = statusBadgeClassMap[currentAppointment.status] || "border-border bg-muted/70 text-foreground";
 
   // State for recording and devices
   const [isUploading, setIsUploading] = React.useState(false);
   const [uploadProgress, setUploadProgress] = React.useState(0);
   const [isProcessing, setIsProcessing] = React.useState(false);
-    const [recordingUrl, setRecordingUrl] = React.useState<string | null>(appointment.recordingUrl ?? null);
+    const [recordingUrl, setRecordingUrl] = React.useState<string | null>(currentAppointment.recordingUrl ?? null);
     const [isRecordingInfoOpen, setIsRecordingInfoOpen] = React.useState(false);
     const [activeMainTab, setActiveMainTab] = React.useState<"context" | "transcript" | "note">("context");
     const uploadInputRef = React.useRef<HTMLInputElement | null>(null);
+    const [isLinkPatientDialogOpen, setIsLinkPatientDialogOpen] = React.useState(false);
+    const [isLoadingPatients, setIsLoadingPatients] = React.useState(false);
+    const [isLinkingPatient, setIsLinkingPatient] = React.useState(false);
+    const [isDeletingAppointment, setIsDeletingAppointment] = React.useState(false);
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
+    const [linkablePatients, setLinkablePatients] = React.useState<LinkablePatient[]>([]);
 
   const { toast } = useToast();
   const { startUpload } = useUploadThing("audioUploader");
@@ -90,7 +141,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         try {
             console.log("Starting upload with file:", audioFile.name, audioFile.type, audioFile.size);
             const res = await startUpload([audioFile], {
-                appointmentId: appointment.id,
+                appointmentId: currentAppointment.id,
             });
             console.log("Upload result:", res);
 
@@ -134,7 +185,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
   const handleRecordingStop = async (audioBlob: Blob) => {
     // Construct file for upload
-    const audioFile = new File([audioBlob], `session-${appointment.id}-${Date.now()}.webm`, { type: audioBlob.type });
+        const audioFile = new File([audioBlob], `session-${currentAppointment.id}-${Date.now()}.webm`, { type: audioBlob.type });
              
         await uploadAudioFile(audioFile);
   };
@@ -156,29 +207,174 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         await uploadAudioFile(file);
         event.target.value = "";
     };
+
+    const openLinkPatientDialog = async () => {
+        setIsLinkPatientDialogOpen(true);
+
+        if (linkablePatients.length > 0) {
+            return;
+        }
+
+        setIsLoadingPatients(true);
+        try {
+            const patients = await getDoctorPatientsForLinking();
+            setLinkablePatients(patients);
+        } catch (error) {
+            console.error("Failed to load patients for linking", error);
+            toast({
+                title: "Could not load patients",
+                description: "Please try again.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsLoadingPatients(false);
+        }
+    };
+
+    const handleLinkPatient = async (patientId: string) => {
+        setIsLinkingPatient(true);
+        try {
+            const result = await linkPatientToAppointment(currentAppointment.id, patientId);
+            if (!result.success || !result.appointment) {
+                toast({
+                    title: "Link failed",
+                    description: result.error || "Could not link patient to this session.",
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            setCurrentAppointment(result.appointment);
+            setIsLinkPatientDialogOpen(false);
+            toast({
+                title: "Patient linked",
+                description: "Patient is now attached to this clinical session.",
+            });
+        } catch (error) {
+            console.error("Failed to link patient", error);
+            toast({
+                title: "Link failed",
+                description: "Could not link patient to this session.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsLinkingPatient(false);
+        }
+    };
+
+    const handlePatientPrimaryAction = () => {
+        if (hasLinkedPatient && currentAppointment.patient?.id) {
+            router.push(`/doctor/patients/${currentAppointment.patient.id}`);
+            return;
+        }
+
+        openLinkPatientDialog();
+    };
+
+    const handleDeleteAppointment = async () => {
+        setIsDeletingAppointment(true);
+        try {
+            const result = await deleteAppointmentSession(currentAppointment.id);
+            if (!result.success) {
+                toast({
+                    title: "Delete failed",
+                    description: result.error || "Could not delete this session.",
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            setIsDeleteDialogOpen(false);
+            toast({
+                title: "Session deleted",
+                description: "Appointment has been deleted successfully.",
+            });
+            if (typeof window !== "undefined") {
+                window.dispatchEvent(new Event("appointments:refresh"));
+            }
+            router.replace("/doctor/dashboard");
+        } catch (error) {
+            console.error("Failed to delete appointment", error);
+            toast({
+                title: "Delete failed",
+                description: "Could not delete this session.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsDeletingAppointment(false);
+        }
+    };
+
     return (
         <div className="flex flex-col h-[calc(100svh-3rem)] overflow-hidden bg-background space-y-0">
       {/* Header Section */}
       <header className="px-4 sm:px-5 py-3 border-b-2 border-border bg-background/95 backdrop-blur z-10">
         <div className="flex flex-col gap-2.5">
           <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <Avatar className="h-10 w-10 border">
-                <AvatarImage src={patientImage} alt={patientName} />
-                <AvatarFallback>{patientInitials}</AvatarFallback>
-              </Avatar>
-              <div className="flex flex-col min-w-0">
-                <div className="flex items-center gap-2 min-w-0">
-                  <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">
-                    {patientName}
-                  </h1>
-                  <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">Patient</Badge>
-                </div>
-                <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
-                  Reason: {reason}
-                </span>
-              </div>
-            </div>
+                        <div className="flex items-center gap-3 min-w-0 text-left">
+                            <button
+                                type="button"
+                                className="rounded-full cursor-pointer"
+                                onClick={handlePatientPrimaryAction}
+                                aria-label={hasLinkedPatient ? "Open patient profile" : "Link patient"}
+                            >
+                                <Avatar className="h-10 w-10 border">
+                                    <AvatarImage src={patientImage || undefined} alt={patientName} />
+                                    <AvatarFallback>{patientInitials}</AvatarFallback>
+                                </Avatar>
+                            </button>
+                            <div className="flex flex-col min-w-0">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">
+                                        {patientName}
+                                    </h1>
+                                    {hasLinkedPatient && (
+                                        <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">
+                                            Patient
+                                        </Badge>
+                                    )}
+                                    {!hasLinkedPatient && (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <button
+                                                    type="button"
+                                                    className="shrink-0"
+                                                    onClick={handlePatientPrimaryAction}
+                                                    aria-label="Link patient"
+                                                >
+                                                    <Badge variant="outline" className="border-2 border-border bg-muted text-foreground font-semibold hover:bg-muted/80 cursor-pointer">
+                                                        Unlinked
+                                                    </Badge>
+                                                </button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="bottom">
+                                                Link patient
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    )}
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <button
+                                                type="button"
+                                                className="p-0 m-0 text-red-500 hover:text-red-600 disabled:opacity-50"
+                                                onClick={() => setIsDeleteDialogOpen(true)}
+                                                disabled={isDeletingAppointment}
+                                                title="Delete session"
+                                                aria-label="Delete session"
+                                            >
+                                                <Trash className="h-4 w-4" strokeWidth={2} />
+                                            </button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="bottom">
+                                            Delete session
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </div>
+                                <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
+                                    {hasLinkedPatient ? `Reason: ${reason}` : "Click patient icon or Unlinked label to link a patient"}
+                                </span>
+                            </div>
+                        </div>
 
             <div className="flex items-center gap-3">
                          <Button
@@ -208,13 +404,16 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 text-sm">
+                        <Badge variant="outline" className={`gap-1.5 py-1 border-2 ${statusBadgeClass}`}>
+                            {statusLabel}
+                        </Badge>
                         <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
                             <Calendar className="h-3.5 w-3.5" />
-                            {format(appointmentDate, "MMMM dd, yyyy")}
+                            {appointmentDate ? format(appointmentDate, "MMMM dd, yyyy") : "No date"}
                         </Badge>
                         <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
                             <Clock3 className="h-3.5 w-3.5" />
-                            {format(appointmentDate, "hh:mm a")}
+                            {appointmentDate ? format(appointmentDate, "hh:mm a") : "--:--"}
                         </Badge>
                         {recordingUrl && (
                             <Badge className="gap-1.5 py-1 pr-1.5 bg-[#CCFF0B] text-black border-2 border-[#B8E609] hover:bg-[#B8E609]">
@@ -438,6 +637,73 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                     )}
                 </DialogContent>
             </Dialog>
+
+            <Dialog open={isLinkPatientDialogOpen} onOpenChange={setIsLinkPatientDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Link patient to this session</DialogTitle>
+                        <DialogDescription>
+                            Choose a patient to attach to this appointment.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="max-h-72 overflow-y-auto space-y-2">
+                        {isLoadingPatients ? (
+                            <div className="py-8 flex items-center justify-center text-sm text-muted-foreground">
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading patients...
+                            </div>
+                        ) : linkablePatients.length === 0 ? (
+                            <div className="py-8 text-center text-sm text-muted-foreground">
+                                No patients found for this doctor yet.
+                            </div>
+                        ) : (
+                            linkablePatients.map((patient) => (
+                                <button
+                                    key={patient.id}
+                                    type="button"
+                                    className="w-full flex items-center justify-between p-2.5 rounded-lg border hover:bg-muted/40 transition-colors"
+                                    onClick={() => handleLinkPatient(patient.id)}
+                                    disabled={isLinkingPatient}
+                                >
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                        <Avatar className="h-8 w-8 border">
+                                            <AvatarImage src={patient.imageUrl || undefined} alt={patient.name} />
+                                            <AvatarFallback>{patient.initials}</AvatarFallback>
+                                        </Avatar>
+                                        <span className="text-sm font-medium truncate">{patient.name}</span>
+                                    </div>
+                                    <Link2 className="h-4 w-4 text-muted-foreground" />
+                                </button>
+                            ))
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            Are you sure you want to delete this session?
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will permanently delete all transcripts, notes and documents associated with this session.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>
+                            Cancel
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            onClick={handleDeleteAppointment}
+                            disabled={isDeletingAppointment}
+                        >
+                            Delete session
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
     </div>
   );
 }

@@ -35,6 +35,15 @@ enum PatientDataType {
   COMMENT
 }
 
+enum AppointmentStatus {
+  UNLINKED
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
 // --------------------------------------
 // CORE USER MODEL (Merged)
 // --------------------------------------
@@ -271,7 +280,7 @@ model PatientReminder {
 model Appointment {
   id        String   @id @default(uuid())
   date      DateTime
-  status    String   @default("PENDING") // PENDING, CONFIRMED, IN_PROGRESS, COMPLETED, CANCELLED
+  status    AppointmentStatus @default(PENDING)
   reason    String?
   notes     String?
   
@@ -291,8 +300,8 @@ model Appointment {
   doctorId  String?
   doctor    DoctorProfile? @relation(fields: [doctorId], references: [id])
   
-  patientId String
-  patient   PatientProfile @relation(fields: [patientId], references: [id])
+  patientId String?
+  patient   PatientProfile? @relation(fields: [patientId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

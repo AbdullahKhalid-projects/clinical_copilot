@@ -60,20 +60,33 @@ export function ClinicalSidebar() {
   const [loading, setLoading] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState("");
 
+  const loadAppointments = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getSidebarAppointments();
+      setAppointments(data);
+    } catch (err) {
+      console.error("Failed to load sidebar appointments", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   // Fetch Data on Mount
   React.useEffect(() => {
-    async function load() {
-      try {
-        const data = await getSidebarAppointments();
-        setAppointments(data);
-      } catch (err) {
-        console.error("Failed to load sidebar appointments", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, []);
+    loadAppointments();
+  }, [loadAppointments]);
+
+  React.useEffect(() => {
+    const onAppointmentsRefresh = () => {
+      loadAppointments();
+    };
+
+    window.addEventListener("appointments:refresh", onAppointmentsRefresh);
+    return () => {
+      window.removeEventListener("appointments:refresh", onAppointmentsRefresh);
+    };
+  }, [loadAppointments]);
 
   // Filter & Group Logic
   const displayItems = React.useMemo(() => {
@@ -108,8 +121,7 @@ export function ClinicalSidebar() {
                     <Search className="h-3.5 w-3.5" />
                 </Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-sidebar-accent/70" onClick={() => {
-                    setLoading(true);
-                    getSidebarAppointments().then(d => { setAppointments(d); setLoading(false); });
+                  loadAppointments();
                 }}>
                     <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
                 </Button>
@@ -180,6 +192,7 @@ export function ClinicalSidebar() {
                 const session = item.data;
                 const isCompleted = session.status === 'COMPLETED';
                 const isCanceled = session.status === 'CANCELLED';
+                const isUnlinked = session.status === 'UNLINKED';
 
                 return (
                     <div 
@@ -242,6 +255,10 @@ export function ClinicalSidebar() {
                              ) : isCanceled ? (
                                 <div className="flex items-center gap-1 text-[10px] text-red-600 font-medium bg-red-50/50 px-1.5 py-0.5 rounded-full border border-red-100/50">
                                    Cancelled
+                                </div>
+                              ) : isUnlinked ? (
+                                <div className="flex items-center gap-1 text-[10px] text-amber-700 font-medium bg-amber-50/80 px-1.5 py-0.5 rounded-full border border-amber-200/70">
+                                  Unlinked
                                 </div>
                              ) : (
                                 <div className="flex items-center gap-1 text-[10px] text-sky-600 font-medium opacity-0 group-hover:opacity-100 transition-opacity">

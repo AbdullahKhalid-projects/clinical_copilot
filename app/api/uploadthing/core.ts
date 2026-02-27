@@ -41,7 +41,10 @@ export const ourFileRouter = {
             },
           },
         },
-        select: { id: true },
+        select: {
+          id: true,
+          patientId: true,
+        },
       });
 
       if (!appointment) {
@@ -52,7 +55,7 @@ export const ourFileRouter = {
         where: { id: appointment.id },
         data: {
           recordingUrl,
-          status: "IN_PROGRESS",
+          status: appointment.patientId ? "IN_PROGRESS" : "UNLINKED",
           aiStatus: "PROCESSING",
         },
       });

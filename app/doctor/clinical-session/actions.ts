@@ -3,32 +3,47 @@
 import { prisma } from "@/lib/prisma";
 import { currentUser, clerkClient } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 
-export async function getClinicalSessionData(appointmentId: string) {
+function isLikelyClerkUserId(value: string | null | undefined): value is string {
+  if (!value) return false;
+  return value.startsWith("user_");
+}
+
+async function getCurrentDoctor() {
   const user = await currentUser();
   if (!user) {
     redirect("/");
   }
 
-  // Ensure the user is a doctor and has access to this appointment
-  // We need to find the doctor via the User relation using the Clerk ID
   const doctor = await prisma.doctorProfile.findFirst({
-    where: { 
+    where: {
       user: {
-        clerkId: user.id
-      }
+        clerkId: user.id,
+      },
     },
   });
 
   if (!doctor) {
-    console.log("Doctor profile not found for user (Clerk ID):", user.id);
+    return null;
+  }
+
+  return doctor;
+}
+
+export async function getClinicalSessionData(appointmentId: string) {
+  const doctor = await getCurrentDoctor();
+
+  if (!doctor) {
+    console.log("Doctor profile not found for current user");
     return null;
   }
 
   console.log("Fetching appointment:", appointmentId);
-  const appointment = await prisma.appointment.findUnique({
-    where: { 
+  const appointment = await prisma.appointment.findFirst({
+    where: {
       id: appointmentId,
+      doctorId: doctor.id,
     },
     include: {
       patient: {
@@ -43,13 +58,13 @@ export async function getClinicalSessionData(appointmentId: string) {
   // or just rely on what we have. But the user asked for Clerk Profile Pic.
   // The 'user' relation has 'clerkId'.
   let patientImageUrl = "";
-  if (appointment?.patient?.user?.clerkId) {
+  if (isLikelyClerkUserId(appointment?.patient?.user?.clerkId)) {
     try {
       const client = await clerkClient();
       const clerkUser = await client.users.getUser(appointment.patient.user.clerkId);
       patientImageUrl = clerkUser.imageUrl;
-    } catch (error) {
-      console.error("Failed to fetch patient image from Clerk", error);
+    } catch {
+      // Ignore stale/invalid Clerk IDs.
     }
   }
 
@@ -85,12 +100,27 @@ export async function updateAppointmentRecording(appointmentId: string, recordin
 
   console.log(`Updating appointment ${appointmentId} with recording: ${recordingUrl}`);
 
+  const existingAppointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      doctorId: doctor.id,
+    },
+    select: {
+      id: true,
+      patientId: true,
+    },
+  });
+
+  if (!existingAppointment) {
+    throw new Error("Appointment not found");
+  }
+
   // Update the appointment
   const updatedAppointment = await prisma.appointment.update({
     where: { id: appointmentId },
     data: {
       recordingUrl: recordingUrl,
-      status: "IN_PROGRESS", // Mark as started if not already
+      status: existingAppointment.patientId ? "IN_PROGRESS" : "UNLINKED",
       aiStatus: "PROCESSING" // Signal that we have audio ready for processing
     },
     select: {
@@ -108,4 +138,205 @@ export async function updateAppointmentRecording(appointmentId: string, recordin
     status: updatedAppointment.status,
     aiStatus: updatedAppointment.aiStatus,
   };
+}
+
+export type LinkablePatient = {
+  id: string;
+  name: string;
+  initials: string;
+  imageUrl: string | null;
+};
+
+export async function getDoctorPatientsForLinking(): Promise<LinkablePatient[]> {
+  const doctor = await getCurrentDoctor();
+  if (!doctor) return [];
+
+  const clerk = await clerkClient();
+
+  const patients = await prisma.patientProfile.findMany({
+    where: {
+      appointments: {
+        some: {
+          doctorId: doctor.id,
+        },
+      },
+    },
+    include: {
+      user: true,
+    },
+  });
+
+  const sortedPatients = patients.sort((a, b) => {
+    const nameA = a.user.name || "";
+    const nameB = b.user.name || "";
+    return nameA.localeCompare(nameB);
+  });
+
+  return Promise.all(
+    sortedPatients.map(async (patient) => {
+      let imageUrl: string | null = null;
+
+      if (isLikelyClerkUserId(patient.user.clerkId)) {
+        try {
+          const clerkUser = await clerk.users.getUser(patient.user.clerkId);
+          imageUrl = clerkUser.imageUrl ?? null;
+        } catch {
+          // Ignore stale/invalid Clerk IDs.
+        }
+      }
+
+      const name = patient.user.name || "Unknown Patient";
+
+      return {
+        id: patient.id,
+        name,
+        initials: name
+          .split(" ")
+          .map((n) => n[0])
+          .join("")
+          .substring(0, 2)
+          .toUpperCase(),
+        imageUrl,
+      };
+    })
+  );
+}
+
+export async function linkPatientToAppointment(appointmentId: string, patientId: string) {
+  const doctor = await getCurrentDoctor();
+  if (!doctor) {
+    return { success: false, error: "Doctor profile not found" };
+  }
+
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      doctorId: doctor.id,
+    },
+  });
+
+  if (!appointment) {
+    return { success: false, error: "Appointment not found" };
+  }
+
+  const patient = await prisma.patientProfile.findUnique({
+    where: { id: patientId },
+    include: { user: true },
+  });
+
+  if (!patient) {
+    return { success: false, error: "Patient not found" };
+  }
+
+  const updatedAppointment = await prisma.appointment.update({
+    where: { id: appointmentId },
+    data: {
+      patientId,
+      status: "IN_PROGRESS",
+    },
+    include: {
+      patient: {
+        include: {
+          user: true,
+        },
+      },
+    },
+  });
+
+  let patientImageUrl = "";
+  if (isLikelyClerkUserId(updatedAppointment.patient?.user?.clerkId)) {
+    try {
+      const client = await clerkClient();
+      const clerkUser = await client.users.getUser(updatedAppointment.patient.user.clerkId);
+      patientImageUrl = clerkUser.imageUrl;
+    } catch {
+      // Ignore stale/invalid Clerk IDs.
+    }
+  }
+
+  revalidatePath(`/doctor/clinical-session/${appointmentId}`);
+  revalidatePath("/doctor/clinical-session");
+  revalidatePath("/doctor/dashboard");
+
+  return {
+    success: true,
+    appointment: {
+      ...updatedAppointment,
+      patientImageUrl,
+    },
+  };
+}
+
+export async function unlinkPatientFromAppointment(appointmentId: string) {
+  const doctor = await getCurrentDoctor();
+  if (!doctor) {
+    return { success: false, error: "Doctor profile not found" };
+  }
+
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      doctorId: doctor.id,
+    },
+  });
+
+  if (!appointment) {
+    return { success: false, error: "Appointment not found" };
+  }
+
+  const updatedAppointment = await prisma.appointment.update({
+    where: { id: appointmentId },
+    data: {
+      patientId: null,
+      status: "UNLINKED",
+    },
+    include: {
+      patient: {
+        include: {
+          user: true,
+        },
+      },
+    },
+  });
+
+  revalidatePath(`/doctor/clinical-session/${appointmentId}`);
+  revalidatePath("/doctor/clinical-session");
+  revalidatePath("/doctor/dashboard");
+
+  return {
+    success: true,
+    appointment: {
+      ...updatedAppointment,
+      patientImageUrl: "",
+    },
+  };
+}
+
+export async function deleteAppointmentSession(appointmentId: string) {
+  const doctor = await getCurrentDoctor();
+  if (!doctor) {
+    return { success: false, error: "Doctor profile not found" };
+  }
+
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      doctorId: doctor.id,
+    },
+    select: { id: true },
+  });
+
+  if (!appointment) {
+    return { success: false, error: "Appointment not found" };
+  }
+
+  await prisma.appointment.delete({
+    where: { id: appointment.id },
+  });
+
+  revalidatePath("/doctor/clinical-session");
+  revalidatePath("/doctor/dashboard");
+  revalidatePath("/doctor");
+
+  return { success: true };
 }

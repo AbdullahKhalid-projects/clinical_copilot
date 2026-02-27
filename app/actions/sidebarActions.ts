@@ -4,6 +4,11 @@ import { prisma } from "@/lib/prisma"
 import { currentUser, clerkClient } from "@clerk/nextjs/server"
 import { format } from "date-fns"
 
+function isLikelyClerkUserId(value: string | null | undefined): value is string {
+  if (!value) return false
+  return value.startsWith("user_")
+}
+
 export type SidebarAppointment = {
   id: string
   title: string      // Reason
@@ -52,7 +57,7 @@ export async function getSidebarAppointments() {
   const uniquePatientClerkIds = Array.from(
     new Set(
       appointments
-        .map((apt) => apt.patient.user.clerkId)
+        .map((apt) => apt.patient?.user?.clerkId)
         .filter((id): id is string => Boolean(id))
     )
   )
@@ -61,27 +66,32 @@ export async function getSidebarAppointments() {
 
   await Promise.all(
     uniquePatientClerkIds.map(async (clerkId) => {
+      if (!isLikelyClerkUserId(clerkId)) {
+        return
+      }
+
       try {
         const clerkUser = await clerk.users.getUser(clerkId)
         if (clerkUser.imageUrl) {
           patientImageMap.set(clerkId, clerkUser.imageUrl)
         }
-      } catch (error) {
-        console.error("Failed to fetch patient image from Clerk", clerkId, error)
+      } catch {
+        // Ignore invalid/stale IDs to avoid noisy server logs.
       }
     })
   )
 
   // Transform to view model
   const viewModels: SidebarAppointment[] = appointments.map(apt => {
-    const pName = apt.patient.user.name || "Unknown Patient"
+    const pName = apt.patient?.user?.name || "Unlinked Patient"
     const initials = (pName || "?").split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+    const patientClerkId = apt.patient?.user?.clerkId
     
     return {
       id: apt.id,
       title: apt.reason || "General Consultation",
       patientName: pName,
-      patientImageUrl: patientImageMap.get(apt.patient.user.clerkId) ?? null,
+      patientImageUrl: patientClerkId ? (patientImageMap.get(patientClerkId) ?? null) : null,
       time: format(apt.date, "h:mm a"), // e.g. 2:30 PM
       date: format(apt.date, "dd/MM/yyyy"), // e.g. 14/02/2026 used for grouping headers
       initials,

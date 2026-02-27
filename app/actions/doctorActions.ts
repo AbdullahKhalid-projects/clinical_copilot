@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { currentUser } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
+import { randomUUID } from "crypto";
 
 // Helper to ensure user is authenticated. 
 // In a real app, you'd also check if the user is a DOCTOR and owns this appointment.
@@ -12,6 +13,62 @@ async function checkAuth() {
     throw new Error("Unauthorized");
   }
   return user;
+}
+
+export async function createNewAppointmentSession() {
+  try {
+    const clerkUser = await checkAuth();
+
+    const dbUser = await prisma.user.findUnique({
+      where: { clerkId: clerkUser.id },
+      include: { doctorProfile: true },
+    });
+
+    if (!dbUser?.doctorProfile) {
+      return { success: false, error: "Doctor profile not found" };
+    }
+
+    let appointmentId: string;
+
+    try {
+      const appointment = await prisma.appointment.create({
+        data: {
+          doctorId: dbUser.doctorProfile.id,
+          patientId: null,
+          date: new Date(),
+          status: "UNLINKED",
+        },
+        select: { id: true },
+      });
+
+      appointmentId = appointment.id;
+    } catch (createError) {
+      const message = createError instanceof Error ? createError.message : "";
+
+      if (!message.includes("Argument `patient` is missing")) {
+        throw createError;
+      }
+
+      const fallbackId = randomUUID();
+      const now = new Date();
+
+      await prisma.$executeRaw`
+        INSERT INTO "Appointment" ("id", "date", "status", "doctorId", "patientId", "createdAt", "updatedAt")
+        VALUES (${fallbackId}, ${now}, CAST(${"UNLINKED"} AS "AppointmentStatus"), ${dbUser.doctorProfile.id}, ${null}, ${now}, ${now})
+      `;
+
+      appointmentId = fallbackId;
+    }
+
+    revalidatePath("/doctor");
+    revalidatePath("/doctor/clinical-session");
+
+    return { success: true, appointmentId };
+  } catch (error) {
+    console.error("Error creating new appointment session:", error);
+    const message = error instanceof Error ? error.message : "Failed to create appointment";
+    return { success: false, error: message };
+  }
 }
 
 export async function startAppointment(appointmentId: string) {
@@ -95,6 +152,7 @@ export async function getDoctorDashboardData() {
   const appointments = await prisma.appointment.findMany({
     where: {
       doctorId: doctorProfile.id,
+      patientId: { not: null },
       date: {
         gte: todayStart,
         lte: todayEnd,
@@ -119,7 +177,10 @@ export async function getDoctorDashboardData() {
   // 2. Total unique patients for this doctor (ever)
   // Use aggregation or distinct count
   const distinctPatients = await prisma.appointment.findMany({
-    where: { doctorId: doctorProfile.id },
+    where: {
+      doctorId: doctorProfile.id,
+      patientId: { not: null },
+    },
     distinct: ['patientId'],
     select: { patientId: true }
   });
@@ -167,7 +228,10 @@ export async function getDoctorPatients() {
 
   // Find all appointments for this doctor to get unique patients
   const appointments = await prisma.appointment.findMany({
-    where: { doctorId: doctorProfile.id },
+    where: {
+      doctorId: doctorProfile.id,
+      patientId: { not: null },
+    },
     include: {
       patient: {
         include: {
@@ -329,6 +393,7 @@ export async function getDoctorSchedule(dateStr?: string) {
   const appointments = await prisma.appointment.findMany({
     where: {
         doctorId: dbUser.doctorProfile.id,
+        patientId: { not: null },
         date: {
             gte: startOfDay,
             lte: endOfDay
