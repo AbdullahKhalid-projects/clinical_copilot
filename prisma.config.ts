@@ -2,8 +2,11 @@ import 'dotenv/config';
 import { defineConfig, env } from 'prisma/config';
 
 export default defineConfig({
+  migrations: {
+    seed: 'npx tsx ./prisma/seeds/seed-templates.ts',
+  },
   datasource: {
-    // justt giving the dabased url from the .env file
+    // Read database URL from .env
     url: env('DATABASE_URL'),
   },
 });

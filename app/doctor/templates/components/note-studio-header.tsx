@@ -1,0 +1,46 @@
+import { ListChecks, ShieldCheck, Sparkles } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+
+export function NoteStudioHeader() {
+  return (
+    <header className="px-4 sm:px-5 py-3 border-b-2 border-border bg-background/95 backdrop-blur z-10">
+      <div className="flex flex-col gap-2.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-10 w-10 shrink-0 rounded-md border-2 border-black bg-yellow-300 flex items-center justify-center">
+              <ListChecks className="h-5 w-5 text-black stroke-2" />
+            </div>
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">
+                  Note Studio
+                </h1>
+                <Badge
+                  variant="outline"
+                  className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold"
+                >
+                  Templates
+                </Badge>
+              </div>
+              <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
+                Pick a template from your gallery, then edit header, body schema, and footer.
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 text-sm">
+          <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            <span>Header / Footer Editable</span>
+          </Badge>
+          <Badge className="gap-1.5 py-1 px-2.5 border border-green-400 bg-green-200 text-green-900 dark:border-green-700 dark:bg-green-900/35 dark:text-green-200 font-medium">
+            <Sparkles className="h-3.5 w-3.5" />
+            Main Body Zod Validated
+          </Badge>
+        </div>
+      </div>
+    </header>
+  );
+}

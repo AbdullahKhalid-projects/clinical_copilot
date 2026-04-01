@@ -75,6 +75,7 @@ const patientMenuItems: NavItem[] = [
 ];
 
 const patientAppointmentItems: NavItem[] = [
+  { label: "Doctors", href: "/patient/doctors", icon: Users },
   { label: "Visit Summaries", href: "/patient/visit-summaries", icon: ClipboardList },
   { label: "Transcripts", href: "/patient/transcripts", icon: MessageSquare },
 ];
@@ -95,6 +96,7 @@ const doctorMenuItems: NavItem[] = [
 const doctorSpaceItems: NavItem[] = [
   { label: "My Patients", href: "/doctor/patients", icon: Users },
   { label: "Schedule", href: "/doctor/schedule", icon: Calendar },
+  { label: "Note Studio", href: "/doctor/note-studio/gallery", icon: ClipboardList },
   { label: "Post-Visit Editor", href: "/doctor/post-visit", icon: FileText },
 ];
 
@@ -119,6 +121,8 @@ export function Sidebar({ role }: SidebarProps) {
   const [mounted, setMounted] = React.useState(false);
   const [isClinicalSidebarOpen, setIsClinicalSidebarOpen] = React.useState(false);
   const [isCreatingAppointment, setIsCreatingAppointment] = React.useState(false);
+  const isDoctor = role === "doctor";
+  const isPatient = role === "patient";
   const bottomItems = role === "doctor" ? doctorBottomItems : patientBottomItems;
 
   const handleNewAppointment = async () => {
@@ -189,11 +193,21 @@ export function Sidebar({ role }: SidebarProps) {
             <SidebarMenuItem className="px-1-4">
               <Button
                 className="w-full justify-center gap-2 bg-black text-white hover:bg-zinc-800 hover:text-white group-data-[collapsible=icon]:hidden shadow-md h-10 font-semibold"
-                onClick={handleNewAppointment}
-                disabled={isCreatingAppointment}
+                onClick={isDoctor ? handleNewAppointment : undefined}
+                disabled={isDoctor && isCreatingAppointment}
+                asChild={isPatient}
               >
-                <Plus className="h-4 w-4" />
-                <span>New Appointment</span>
+                {isPatient ? (
+                  <Link href="/patient/doctors">
+                    <Plus className="h-4 w-4" />
+                    <span>Schedule Appointment</span>
+                  </Link>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4" />
+                    <span>New Session</span>
+                  </>
+                )}
               </Button>
 
               <Tooltip>
@@ -201,13 +215,13 @@ export function Sidebar({ role }: SidebarProps) {
                   <Button
                     className="h-9 w-9 p-0 hidden group-data-[collapsible=icon]:flex mx-auto bg-black text-white hover:bg-zinc-800 hover:text-white rounded-lg"
                     size="icon"
-                    onClick={handleNewAppointment}
-                    disabled={isCreatingAppointment}
+                    onClick={isDoctor ? handleNewAppointment : () => router.push("/patient/doctors")}
+                    disabled={isDoctor && isCreatingAppointment}
                   >
                     <Plus className="h-5 w-5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="right">New Appointment</TooltipContent>
+                <TooltipContent side="right">{isDoctor ? "New Session" : "Schedule Appointment"}</TooltipContent>
               </Tooltip>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -255,9 +269,14 @@ export function Sidebar({ role }: SidebarProps) {
                               />
                             </>
                           ) : (
-                            <Link href={item.href}>
+                            <Link href={item.href} className="flex w-full items-center gap-2">
                               <item.icon className={isActive ? "text-primary" : "text-muted-foreground"} />
-                              <span>{item.label}</span>
+                              <span className="truncate">{item.label}</span>
+                              {item.label === "Note Studio" ? (
+                                <span className="ml-auto rounded-full bg-zinc-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-700 group-data-[collapsible=icon]:hidden">
+                                  Beta
+                                </span>
+                              ) : null}
                             </Link>
                           )}
                         </SidebarMenuButton>

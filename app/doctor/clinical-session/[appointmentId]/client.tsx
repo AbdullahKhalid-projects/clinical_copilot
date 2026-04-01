@@ -480,7 +480,12 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                 {/* Editor Toolbar */}
                 <div className="flex items-center justify-between p-2 border-b bg-muted/30">
                     <div className="flex items-center gap-2">
-                        <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-2 text-muted-foreground"
+                            onClick={() => router.push("/doctor/note-studio/gallery")}
+                        >
                             <span className="i-grid" /> Select a template
                         </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8">

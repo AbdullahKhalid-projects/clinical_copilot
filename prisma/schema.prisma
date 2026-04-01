@@ -44,6 +44,33 @@ enum AppointmentStatus {
   CANCELLED
 }
 
+enum NoteTemplateSource {
+  LIBRARY
+  PERSONAL
+}
+
+enum NoteTemplateFieldType {
+  STRING
+  NUMBER
+  BOOLEAN
+}
+
+enum NoteTemplateFallbackPolicy {
+  EMPTY
+  NOT_DOCUMENTED
+  OMIT_IF_OPTIONAL
+}
+
+enum HeaderFooterStyle {
+  DEFAULT
+}
+
+enum HeaderTextAlign {
+  LEFT
+  CENTER
+  RIGHT
+}
+
 // --------------------------------------
 // CORE USER MODEL (Merged)
 // --------------------------------------
@@ -66,6 +93,61 @@ model User {
   // --- Relations: Hospital Management System (Schema 2) ---
   doctorProfile       DoctorProfile?
   patientProfile      PatientProfile?
+
+  // --- Relations: Note Studio ---
+  noteTemplates       NoteTemplate[]
+}
+
+// --------------------------------------
+// NOTE STUDIO
+// --------------------------------------
+
+model NoteTemplate {
+  id                String             @id @default(cuid())
+  slug              String?            @unique
+  name              String
+  description       String
+  source            NoteTemplateSource @default(PERSONAL)
+  isActive          Boolean            @default(true)
+  headerFooterStyle HeaderFooterStyle  @default(DEFAULT)
+  headerTextAlign   HeaderTextAlign    @default(CENTER)
+  promptDirectives  String?            @db.Text
+  profileContext    Json
+  header            String             @db.Text
+  footer            String             @db.Text
+  normalization     Json?
+
+  userId            String?
+  user              User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  fields            NoteTemplateField[]
+
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([source])
+  @@index([userId, source])
+}
+
+model NoteTemplateField {
+  id             String                     @id @default(cuid())
+  templateId     String
+  template       NoteTemplate               @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  fieldOrder     Int
+  key            String
+  label          String
+  type           NoteTemplateFieldType      @default(STRING)
+  required       Boolean                    @default(false)
+  guidance       String?                    @db.Text
+  hint           String?
+  fallbackPolicy NoteTemplateFallbackPolicy @default(EMPTY)
+
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  @@unique([templateId, key])
+  @@unique([templateId, fieldOrder])
+  @@index([templateId, fieldOrder])
 }
 
 // --------------------------------------

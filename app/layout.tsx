@@ -3,6 +3,7 @@ import { ClerkProvider } from '@clerk/nextjs'
 import type { Metadata } from 'next'
 import { Inter, Libre_Baskerville } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
+import { Toaster } from '@/components/ui/toaster'
 import './globals.css'
 
 const inter = Inter({ 
@@ -52,6 +53,7 @@ export default function RootLayout({
           suppressHydrationWarning
         >
           {children}
+          <Toaster />
           <Analytics />
         </body>
       </html>
