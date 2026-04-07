@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Clinical Co-Pilot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Instrument+Serif:ital@0;1&family=Syne:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet" />
+  <style>
+    :root {
+      --bg-deep: #080c12;
+      --bg-card: #0d1520;
+      --bg-elevated: #121d2b;
+      --bg-surface: #162234;
+      --border: #1e3048;
+      --border-bright: #2a4a6e;
+      --text-primary: #dce8f5;
+      --text-secondary: #7a9ab8;
+      --text-muted: #3d5a72;
+      --accent-blue: #2d7dd2;
+      --accent-blue-bright: #4a9eff;
+      --accent-green: #1a9c6b;
+      --accent-green-bright: #2ecc9a;
+      --accent-amber: #d4860a;
+      --accent-rose: #c0394a;
+      --doctor-bg: #0a1f3d;
+      --doctor-border: #1a4a80;
+      --doctor-text: #7ecfff;
+      --patient-bg: #0a2a1a;
+      --patient-border: #1a6040;
+      --patient-text: #6effc4;
+      --nurse-bg: #2a1a3d;
+      --nurse-border: #5a2a80;
+      --nurse-text: #d4a0ff;
+      --unknown-bg: #1a1a2a;
+      --unknown-border: #2a2a45;
+      --draft-text: #4a6a85;
+      --glow-blue: 0 0 20px rgba(45, 125, 210, 0.3);
+      --radius: 10px;
+      --radius-sm: 6px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      height: 100%;
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      font-family: 'Syne', sans-serif;
+      overflow: hidden;
+    }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 20px;
+      height: 58px;
+      flex-shrink: 0;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'Instrument Serif', serif;
+      font-size: 1.3rem;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+
+    .logo .icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #1a4a80, #2d7dd2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+      box-shadow: var(--glow-blue);
+    }
+
+    .logo em {
+      font-style: italic;
+      color: var(--accent-blue-bright);
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      background: var(--bg-elevated);
+      text-transform: uppercase;
+      transition: all 0.3s;
+    }
+
+    .status-pill .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: all 0.3s;
+    }
+
+    .status-pill.recording {
+      border-color: var(--accent-rose);
+      color: #ff6b7a;
+    }
+
+    .status-pill.recording .dot {
+      background: var(--accent-rose);
+      animation: pulse 1.4s ease-in-out infinite;
+      box-shadow: 0 0 6px var(--accent-rose);
+    }
+
+    .status-pill.diarizing {
+      border-color: var(--accent-amber);
+      color: var(--accent-amber);
+    }
+
+    .status-pill.diarizing .dot {
+      background: var(--accent-amber);
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1)
+      }
+
+      50% {
+        opacity: 0.5;
+        transform: scale(0.85)
+      }
+    }
+
+    .timer {
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .header-spacer {
+      flex: 1;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+      font-family: 'Syne', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .btn:hover {
+      border-color: var(--border-bright);
+      color: var(--text-primary);
+      background: var(--bg-surface);
+    }
+
+    .btn.primary {
+      background: var(--accent-blue);
+      border-color: var(--accent-blue);
+      color: white;
+    }
+
+    .btn.primary:hover {
+      background: var(--accent-blue-bright);
+      border-color: var(--accent-blue-bright);
+      box-shadow: var(--glow-blue);
+    }
+
+    .btn.danger {
+      border-color: var(--accent-rose);
+      color: var(--accent-rose);
+    }
+
+    .btn.danger:hover {
+      background: rgba(192, 57, 74, 0.15);
+    }
+
+    .btn.success {
+      border-color: var(--accent-green);
+      color: var(--accent-green-bright);
+    }
+
+    .btn.success:hover {
+      background: rgba(26, 156, 107, 0.15);
+    }
+
+    .btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    .content {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .transcript-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg-card);
+      flex-shrink: 0;
+    }
+
+    .panel-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-secondary);
+    }
+
+    .legend {
+      display: flex;
+      gap: 14px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .diarize-bar {
+      height: 2px;
+      background: transparent;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+
+    .diarize-bar.active {
+      background: linear-gradient(90deg, var(--accent-amber), var(--accent-blue));
+      animation: sweep 2s linear infinite;
+    }
+
+    @keyframes sweep {
+      0% {
+        background-position: 0%
+      }
+
+      100% {
+        background-position: 200%
+      }
+    }
+
+    #transcript-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      scroll-behavior: smooth;
+    }
+
+    #transcript-container::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    #transcript-container::-webkit-scrollbar-thumb {
+      background: var(--border-bright);
+      border-radius: 2px;
+    }
+
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      gap: 10px;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .empty-state svg {
+      opacity: 0.3;
+    }
+
+    .bubble-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .bubble-wrapper.new {
+      animation: slideIn 0.25s ease;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(8px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0)
+      }
+    }
+
+    .bubble-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 4px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .bubble-header .ts {
+      color: var(--text-muted);
+      font-family: 'DM Mono', monospace;
+      font-weight: 400;
+    }
+
+    .bubble {
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      border: 1px solid;
+      line-height: 1.6;
+      font-size: 13.5px;
+      position: relative;
+      max-width: 100%;
+      transition: background 0.3s, border-color 0.3s;
+    }
+
+    .role-doctor .bubble-header {
+      color: var(--doctor-text);
+    }
+
+    .role-doctor .bubble {
+      background: var(--doctor-bg);
+      border-color: var(--doctor-border);
+      color: var(--text-primary);
+    }
+
+    .role-patient .bubble-header {
+      color: var(--patient-text);
+    }
+
+    .role-patient .bubble {
+      background: var(--patient-bg);
+      border-color: var(--patient-border);
+      color: var(--text-primary);
+    }
+
+    .role-nurse .bubble-header {
+      color: var(--nurse-text);
+    }
+
+    .role-nurse .bubble {
+      background: var(--nurse-bg);
+      border-color: var(--nurse-border);
+      color: var(--text-primary);
+    }
+
+    .role-unknown .bubble-header {
+      color: var(--text-secondary);
+    }
+
+    .role-unknown .bubble {
+      background: var(--unknown-bg);
+      border-color: var(--unknown-border);
+      color: var(--text-primary);
+    }
+
+    .is-draft .bubble {
+      background: rgba(30, 40, 55, 0.4) !important;
+      border-color: var(--border) !important;
+      color: var(--draft-text) !important;
+      font-style: italic;
+      border-style: dashed !important;
+    }
+
+    .is-draft .bubble-header {
+      color: var(--text-muted) !important;
+    }
+
+    .is-draft .bubble::after {
+      content: '●●●';
+      position: absolute;
+      bottom: 8px;
+      right: 10px;
+      font-size: 8px;
+      color: var(--text-muted);
+      letter-spacing: 2px;
+      animation: dots 1.5s infinite;
+    }
+
+    @keyframes dots {
+
+      0%,
+      100% {
+        opacity: 0.3
+      }
+
+      50% {
+        opacity: 1
+      }
+    }
+
+    .sidebar {
+      width: 390px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-card);
+      overflow: hidden;
+    }
+
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      background: var(--bg-deep);
+    }
+
+    .tab {
+      flex: 1;
+      padding: 12px 8px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+
+    .tab:hover {
+      color: var(--text-secondary);
+    }
+
+    .tab.active {
+      color: var(--accent-blue-bright);
+      border-bottom-color: var(--accent-blue-bright);
+    }
+
+    .tab-badge {
+      display: inline-block;
+      margin-left: 4px;
+      background: var(--accent-blue);
+      color: white;
+      border-radius: 100px;
+      font-size: 9px;
+      padding: 1px 5px;
+      font-weight: 700;
+    }
+
+    .tab-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .tab-content::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .tab-content::-webkit-scrollbar-thumb {
+      background: var(--border-bright);
+      border-radius: 2px;
+    }
+
+    .fact-section {
+      margin-bottom: 14px;
+    }
+
+    .fact-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .fact-section-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent-blue-bright);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .fact-count {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-family: 'DM Mono', monospace;
+    }
+
+    .fact-item {
+      padding: 7px 10px;
+      border-radius: var(--radius-sm);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      font-size: 12px;
+      line-height: 1.5;
+      margin-bottom: 4px;
+      color: var(--text-primary);
+    }
+
+    .fact-item .fact-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+      text-transform: uppercase;
+    }
+
+    .fact-item .fact-value {
+      font-weight: 500;
+    }
+
+    .fact-item .fact-sub {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 1px;
+    }
+
+    .empty-facts {
+      text-align: center;
+      padding: 30px 16px;
+      color: var(--text-muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .alert-item {
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      border-left: 3px solid;
+      margin-bottom: 8px;
+      background: var(--bg-elevated);
+      font-size: 12px;
+      animation: slideIn 0.2s ease;
+    }
+
+    .alert-critical {
+      border-color: var(--accent-rose);
+    }
+
+    .alert-warning {
+      border-color: var(--accent-amber);
+    }
+
+    .alert-info {
+      border-color: var(--accent-blue);
+    }
+
+    .alert-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .alert-critical .alert-label {
+      color: var(--accent-rose);
+    }
+
+    .alert-warning .alert-label {
+      color: var(--accent-amber);
+    }
+
+    .alert-info .alert-label {
+      color: var(--accent-blue-bright);
+    }
+
+    .soap-section {
+      margin-bottom: 14px;
+    }
+
+    .soap-section-title {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent-blue-bright);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .soap-body {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.7;
+      color: var(--text-primary);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .soap-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      gap: 14px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent-blue-bright);
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    .vu-bar {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 20px;
+      margin-left: 8px;
+    }
+
+    .vu-segment {
+      width: 3px;
+      border-radius: 1px;
+      background: var(--border);
+      transition: height 0.08s;
+    }
+
+    #waveform-bar {
+      width: 100%;
+      height: 36px;
+      background: var(--bg-deep);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 9999;
+      padding: 10px 16px;
+      border-radius: var(--radius-sm);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-bright);
+      font-size: 12px;
+      color: var(--text-primary);
+      opacity: 0;
+      transform: translateY(8px);
+      transition: all 0.25s;
+      pointer-events: none;
+      max-width: 320px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    }
+
+    #toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .avs-divider {
+      margin: 14px 0 10px;
+      border: none;
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <header>
+      <div class="logo">
+        <div class="icon">⚕</div>Clinical <em>Co-Pilot</em>
+      </div>
+      <div class="status-pill" id="status-pill">
+        <div class="dot"></div><span id="status-label">Standby</span>
+      </div>
+      <div class="timer" id="timer-display">00:00</div>
+      <div class="vu-bar" id="vu-bar">
+        <div class="vu-segment" id="vu-0"></div>
+        <div class="vu-segment" id="vu-1"></div>
+        <div class="vu-segment" id="vu-2"></div>
+        <div class="vu-segment" id="vu-3"></div>
+        <div class="vu-segment" id="vu-4"></div>
+        <div class="vu-segment" id="vu-5"></div>
+        <div class="vu-segment" id="vu-6"></div>
+      </div>
+      <div class="header-spacer"></div>
+      <button class="btn primary" id="btn-start" onclick="startSession()">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <circle cx="6" cy="6" r="5" />
+        </svg>Start
+      </button>
+      <button class="btn danger" id="btn-stop" onclick="stopSession()" disabled>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <rect x="2" y="2" width="8" height="8" rx="1" />
+        </svg>Stop
+      </button>
+      <button class="btn" id="btn-soap" onclick="generateSoap()" disabled>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M2 3h8M2 6h6M2 9h4" />
+        </svg>SOAP / AVS
+      </button>
+      <button class="btn success" id="btn-pdf" onclick="downloadPdf()" disabled>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M2 1h6l2 2v8H2V1z" />
+          <path d="M7 1v3h3" />
+          <path d="M4 7h4M4 9h2" />
+        </svg>PDF
+      </button>
+      <button class="btn" onclick="clearSession()">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M2 2l8 8M10 2l-8 8" />
+        </svg>Clear
+      </button>
+    </header>
+
+    <div class="content">
+      <div class="transcript-panel">
+        <div class="panel-header">
+          <span class="panel-title">Live Transcript</span>
+          <div class="legend">
+            <div class="legend-item">
+              <div class="legend-dot" style="background:var(--doctor-text)"></div>Doctor
+            </div>
+            <div class="legend-item">
+              <div class="legend-dot" style="background:var(--patient-text)"></div>Patient
+            </div>
+            <div class="legend-item">
+              <div class="legend-dot" style="background:var(--nurse-text)"></div>Nurse/Guardian
+            </div>
+            <div class="legend-item">
+              <div class="legend-dot" style="background:var(--draft-text)"></div>Processing…
+            </div>
+          </div>
+        </div>
+        <div class="diarize-bar" id="diarize-bar"></div>
+        <div id="transcript-container">
+          <div class="empty-state" id="empty-state">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M24 4C13 4 4 13 4 24s9 20 20 20 20-9 20-20S35 4 24 4z" />
+              <path d="M16 20c0-4.4 3.6-8 8-8s8 3.6 8 8v4c0 4.4-3.6 8-8 8" />
+              <path d="M24 36v4M20 40h8" />
+            </svg>
+            <p>Start a session to begin live transcription of your medical consultation.</p>
+          </div>
+        </div>
+        <canvas id="waveform-bar"></canvas>
+      </div>
+
+      <div class="sidebar">
+        <div class="tabs">
+          <div class="tab active" onclick="switchTab('facts')">Facts <span class="tab-badge" id="facts-badge"
+              style="display:none">0</span></div>
+          <div class="tab" onclick="switchTab('alerts')">Alerts <span class="tab-badge" id="alerts-badge"
+              style="display:none">0</span></div>
+          <div class="tab" onclick="switchTab('soap')">SOAP / AVS</div>
+        </div>
+        <div class="tab-content active" id="tab-facts">
+          <div class="empty-facts" id="facts-empty">
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.2"
+              style="margin:0 auto 8px;display:block;opacity:0.3">
+              <path d="M8 6h20v24H8z" />
+              <path d="M12 12h12M12 17h12M12 22h8" />
+            </svg>
+            Clinical facts will appear here as the conversation progresses.
+          </div>
+          <div id="facts-content" style="display:none"></div>
+        </div>
+        <div class="tab-content" id="tab-alerts">
+          <div id="alerts-content">
+            <div class="empty-facts">
+              <svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.2"
+                style="margin:0 auto 8px;display:block;opacity:0.3">
+                <path d="M18 4l14 26H4L18 4z" />
+                <path d="M18 14v8M18 25v1" />
+              </svg>
+              No alerts generated yet.
+            </div>
+          </div>
+        </div>
+        <div class="tab-content" id="tab-soap">
+          <div id="soap-content">
+            <div class="empty-facts">
+              <svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.2"
+                style="margin:0 auto 8px;display:block;opacity:0.3">
+                <path d="M7 4h22l4 4v24H7V4z" />
+                <path d="M22 4v8h8" />
+                <path d="M12 18h12M12 23h10M12 28h8" />
+              </svg>
+              Click <strong>SOAP / AVS</strong> to generate the clinical note after the consultation.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="toast"></div>
+
+  <script>
+    const state = {
+      ws: null, audioCtx: null, mediaStream: null, processor: null,
+      recording: false, sessionId: null, timerInterval: null, timerSeconds: 0,
+      drafts: {}, finalSegments: [], soapGenerated: false,
+    };
+
+    function connectWS() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      state.ws = new WebSocket(`${proto}://${location.host}/ws/transcribe/v2`);
+      state.ws.onopen = () => { console.log('[WS] open'); showToast('Connected'); };
+      state.ws.onclose = () => { console.log('[WS] closed'); if (state.recording) stopSession(); };
+      state.ws.onerror = () => showToast('WebSocket error', 'error');
+      state.ws.onmessage = ev => {
+        try { handleMessage(JSON.parse(ev.data)); }
+        catch (e) { console.error('[WS] parse error', e); }
+      };
+    }
+
+    function handleMessage(msg) {
+      switch (msg.type) {
+        case 'session_start': state.sessionId = msg.session_id; break;
+        case 'transcript_draft': onDraft(msg); break;
+        case 'transcript_final': onFinal(msg); break;
+        case 'facts_update': onFacts(msg); break;
+        case 'session_stopped':
+          state.ws.close();
+          document.getElementById('status-pill').className = 'status-pill';
+          document.getElementById('status-label').textContent = 'Stopped';
+          document.getElementById('btn-start').disabled = false;
+          setDiarizeBar(false); resetVU(); showToast('Session securely saved & finalized');
+          break;
+        case 'pong': break;
+      }
+    }
+
+    function onDraft(msg) {
+      showEmptyState(false);
+      const container = document.getElementById('transcript-container');
+      const wrapper = document.createElement('div');
+      wrapper.className = 'bubble-wrapper new role-unknown is-draft';
+      wrapper.dataset.draftId = msg.draft_id;
+      wrapper.innerHTML = `
+        <div class="bubble-header"><span>❓ Unknown</span><span class="ts">processing…</span></div>
+        <div class="bubble">${esc(msg.text)}</div>`;
+      container.appendChild(wrapper);
+      container.scrollTop = container.scrollHeight;
+      state.drafts[msg.draft_id] = { draft_id: msg.draft_id, el: wrapper };
+    }
+
+    function onFinal(msg) {
+      const segments = msg.segments || [];
+      const speakerRoles = msg.speaker_roles || {};
+      if (segments.length === 0) return;
+
+      showEmptyState(false);
+      setDiarizeBar(false);
+
+      Object.values(state.drafts).forEach(d => d.el && d.el.remove());
+      state.drafts = {};
+      const container = document.getElementById('transcript-container');
+      container.querySelectorAll('.bubble-wrapper.finalized').forEach(el => el.remove());
+
+      const grouped = [];
+      for (const seg of segments) {
+        const spk = seg.speaker || 'Unknown';
+        const role = speakerRoles[spk] || seg.role || 'Unknown';
+        const prev = grouped[grouped.length - 1];
+
+        const sameSpeaker = prev && prev.speaker === spk;
+        const hasTimestamps = prev && prev.end > 0 && seg.start > 0;
+        const gapSmall = hasTimestamps && (seg.start - prev.end) <= 3.5;
+
+        if (sameSpeaker && gapSmall) {
+          prev.text += ' ' + seg.text.trim();
+          prev.end = seg.end;
+        } else {
+          grouped.push({ speaker: spk, role, text: seg.text.trim(), start: seg.start ?? 0, end: seg.end ?? 0 });
+        }
+      }
+
+      const fragment = document.createDocumentFragment();
+      for (const g of grouped) {
+        const rc = roleClass(g.role);
+        const wrapper = document.createElement('div');
+        wrapper.className = `bubble-wrapper new finalized role-${rc}`;
+        const tsStr = fmtTime(g.start);
+        wrapper.innerHTML = `
+          <div class="bubble-header">
+            <span>${roleIcon(g.role)} ${esc(g.role)}</span>
+            ${tsStr ? `<span class="ts">${tsStr}</span>` : ''}
+          </div>
+          <div class="bubble">${esc(g.text)}</div>`;
+        fragment.appendChild(wrapper);
+      }
+      container.appendChild(fragment);
+      container.scrollTop = container.scrollHeight;
+      state.finalSegments = segments;
+    }
+
+    function setDiarizeBar(active) {
+      const bar = document.getElementById('diarize-bar');
+      if (bar) bar.classList.toggle('active', active);
+    }
+
+    function onFacts(msg) { renderFacts(msg.facts); generateAlerts(msg.facts); }
+
+    const FACT_ICONS = {
+      patient_profile: '👤', chief_complaint: '🚨', history_of_present_illness: '📖',
+      past_medical_history: '📚', current_illnesses: '🤒', mental_observations: '🧠',
+      physical_observations: '👀', medications: '💊', diagnoses: '🔬', symptoms: '🩺',
+      allergies: '⚠️', vitals: '📊', procedures: '🏥', family_history: '👨‍👩‍👧',
+      social_and_lifestyle: '🧑‍🤝‍🧑', labs_and_imaging: '🖼️', plan: '📅'
+    };
+
+    function renderFacts(facts) {
+      if (!facts || Object.keys(facts).length === 0) return;
+      const content = document.getElementById('facts-content');
+      const empty = document.getElementById('facts-empty');
+      content.style.display = 'block';
+      if (empty) empty.style.display = 'none';
+      content.innerHTML = '';
+
+      let total = 0;
+      for (const [cat, rawItems] of Object.entries(facts)) {
+        if (!rawItems) continue;
+
+        let items = Array.isArray(rawItems) ? rawItems : [rawItems];
+        items = items.filter(i => {
+          if (typeof i === 'object') return Object.values(i).some(v => v !== '' && v != null && v !== 'N/A' && v !== 'Unknown' && v !== 'Not documented');
+          return i !== '' && i != null && i !== 'N/A' && i !== 'Unknown' && i !== 'Not documented';
+        });
+
+        if (items.length === 0) continue;
+        total += items.length;
+
+        const section = document.createElement('div');
+        section.className = 'fact-section';
+        const catName = cat.replace(/_/g, ' ');
+        section.innerHTML = `<div class="fact-section-header"><div class="fact-section-title">${FACT_ICONS[cat] || '📌'} ${catName}</div><span class="fact-count">${items.length}</span></div>`;
+
+        for (const item of items) {
+          const el = document.createElement('div');
+          el.className = 'fact-item';
+          if (typeof item === 'string') {
+            el.innerHTML = `<div class="fact-value">${esc(item)}</div>`;
+          } else {
+            const entries = Object.entries(item).filter(([, v]) => v != null && v !== '' && v !== 'N/A' && v !== 'Unknown' && v !== 'Not documented');
+            if (entries.length === 0) continue;
+            const [[mk, mv] = ['', ''], ...rest] = entries;
+            el.innerHTML = `<div class="fact-label">${esc(mk.replace(/_/g, ' '))}</div><div class="fact-value">${esc(String(mv))}</div>
+              ${rest.map(([k, v]) => `<div class="fact-sub">${esc(k.replace(/_/g, ' '))}: ${esc(String(v))}</div>`).join('')}`;
+          }
+          section.appendChild(el);
+        }
+        content.appendChild(section);
+      }
+      const badge = document.getElementById('facts-badge');
+      badge.textContent = total;
+      badge.style.display = total > 0 ? 'inline' : 'none';
+    }
+
+    function generateAlerts(facts) {
+      const alerts = [];
+      const allergies = Array.isArray(facts.allergies) ? facts.allergies : [];
+      allergies.forEach(a => { alerts.push({ type: 'critical', label: 'Allergy Alert', text: `Reported allergy: ${a.substance || JSON.stringify(a)}` }); });
+      const meds = Array.isArray(facts.medications) ? facts.medications : [];
+      if (meds.length > 0) alerts.push({ type: 'info', label: 'Medications Noted', text: `${meds.length} medication(s) identified.` });
+      const vitals = Array.isArray(facts.vitals) ? facts.vitals : [];
+      vitals.forEach(v => { if ((v.name || '').toLowerCase().match(/bp|blood.?pressure/)) alerts.push({ type: 'warning', label: 'Blood Pressure', text: `Documented: ${v.value} ${v.unit || ''}`.trim() }); });
+
+      if (!alerts.length) return;
+      const content = document.getElementById('alerts-content');
+      content.innerHTML = '';
+      alerts.forEach(a => {
+        const el = document.createElement('div');
+        el.className = `alert-item alert-${a.type}`;
+        el.innerHTML = `<div class="alert-label">${esc(a.label)}</div><div>${esc(a.text)}</div>`;
+        content.appendChild(el);
+      });
+      const badge = document.getElementById('alerts-badge');
+      badge.textContent = alerts.length;
+      badge.style.display = 'inline';
+    }
+
+    // JSON safe serialization guard
+    function formatValue(val) {
+      if (!val || val === 'Not documented.') return 'Not documented.';
+      if (typeof val === 'object') return JSON.stringify(val, null, 2);
+      return String(val);
+    }
+
+    function escBr(str) {
+      return esc(str).replace(/\n/g, '<br/>');
+    }
+
+    function renderSoap(data) {
+      const content = document.getElementById('soap-content');
+      const soap = data.soap || {};
+      const avs = data.avs || {};
+
+      let html = '<div style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent-blue-bright);margin-bottom:10px">SOAP Note</div>';
+      for (const [icon, label, key] of [['🗣', 'S — Subjective', 'subjective'], ['📊', 'O — Objective', 'objective'], ['🔬', 'A — Assessment', 'assessment'], ['📋', 'P — Plan', 'plan']]) {
+        const textVal = formatValue(soap[key]);
+        html += `<div class="soap-section"><div class="soap-section-title">${icon} ${label}</div><div class="soap-body">${escBr(textVal)}</div></div>`;
+      }
+      html += '<hr class="avs-divider"/><div style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:var(--accent-green-bright);margin-bottom:10px">After Visit Summary</div>';
+      for (const [icon, label, key] of [['🔬', 'Diagnosis', 'diagnosis'], ['📝', 'Instructions', 'instructions'], ['💊', 'Medications', 'medications'], ['📅', 'Follow-Up', 'followup'], ['⚠️', 'Warnings', 'warnings']]) {
+        if (!avs[key] || avs[key] === "Not documented.") continue;
+        const textVal = formatValue(avs[key]);
+        html += `<div class="soap-section"><div class="soap-section-title" style="color:var(--accent-green-bright)">${icon} ${label}</div><div class="soap-body">${escBr(textVal)}</div></div>`;
+      }
+      content.innerHTML = html;
+      state.soapGenerated = true;
+      document.getElementById('btn-pdf').disabled = false;
+      switchTab('soap');
+    }
+
+    async function startSession() {
+      try { state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } }); }
+      catch (e) { showToast('Microphone access denied', 'error'); return; }
+
+      connectWS();
+      await new Promise(r => setTimeout(r, 600));
+      state.audioCtx = new AudioContext({ sampleRate: 16000 });
+      const source = state.audioCtx.createMediaStreamSource(state.mediaStream);
+      state.processor = state.audioCtx.createScriptProcessor(4096, 1, 1);
+      source.connect(state.processor);
+      state.processor.connect(state.audioCtx.destination);
+      state.processor.onaudioprocess = ev => {
+        if (!state.recording || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+        const f32 = ev.inputBuffer.getChannelData(0);
+        const pcm = floatToPCM16(f32);
+        state.ws.send(pcm.buffer);
+        updateVU(f32); drawWaveform(f32);
+      };
+      state.recording = true;
+      document.getElementById('btn-start').disabled = true; document.getElementById('btn-stop').disabled = false; document.getElementById('btn-soap').disabled = false;
+      const pill = document.getElementById('status-pill'); pill.className = 'status-pill recording'; document.getElementById('status-label').textContent = 'Recording';
+
+      state.timerSeconds = 0;
+      state.timerInterval = setInterval(() => {
+        state.timerSeconds++;
+        const m = String(Math.floor(state.timerSeconds / 60)).padStart(2, '0');
+        const s = String(state.timerSeconds % 60).padStart(2, '0');
+        document.getElementById('timer-display').textContent = `${m}:${s}`;
+      }, 1000);
+      state.diarizeInterval = setInterval(() => { setDiarizeBar(true); setTimeout(() => setDiarizeBar(false), 3000); }, 30000);
+      showToast('Session started — listening…');
+    }
+
+    function stopSession() {
+      state.recording = false;
+      clearInterval(state.diarizeInterval); clearInterval(state.timerInterval);
+      const pill = document.getElementById('status-pill');
+      pill.className = 'status-pill diarizing';
+      document.getElementById('status-label').textContent = 'Finalizing...';
+      document.getElementById('btn-start').disabled = true; document.getElementById('btn-stop').disabled = true;
+      showToast('Processing final audio flush...');
+
+      if (state.ws && state.ws.readyState === WebSocket.OPEN) { state.ws.send(JSON.stringify({ action: 'stop' })); }
+      if (state.processor) { state.processor.disconnect(); state.processor = null; }
+      if (state.audioCtx) { state.audioCtx.close(); state.audioCtx = null; }
+      if (state.mediaStream) { state.mediaStream.getTracks().forEach(t => t.stop()); state.mediaStream = null; }
+    }
+
+    async function generateSoap() {
+      if (!state.sessionId) { showToast('No active session', 'error'); return; }
+      switchTab('soap');
+      document.getElementById('soap-content').innerHTML = `<div class="soap-loading"><div class="spinner"></div><div>Generating SOAP Note & AVS…<br><span style="font-size:11px;color:var(--text-muted)">Running formal fact audit → SOAP generation</span></div></div>`;
+      if (state.recording) stopSession();
+      try {
+        const resp = await fetch(`/api/soap/${state.sessionId}`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.error) { showToast(data.error, 'error'); return; }
+        state.sessionId = data.session_id || state.sessionId;
+        if (data.transcript && data.speaker_roles) onFinal({ segments: data.transcript, speaker_roles: data.speaker_roles });
+        renderFacts(data.facts); renderSoap(data); showToast('SOAP Note generated');
+      } catch (e) {
+        showToast('Failed to generate SOAP note', 'error');
+        document.getElementById('soap-content').innerHTML = '<div class="empty-facts">Error. Check server logs.</div>';
+      }
+    }
+
+    function downloadPdf() { if (!state.sessionId) { showToast('No session to export', 'error'); return; } window.open(`/api/pdf/${state.sessionId}`, '_blank'); }
+
+    function clearSession() {
+      if (state.recording) stopSession();
+      const container = document.getElementById('transcript-container');
+      container.innerHTML = ''; showEmptyState(true);
+      state.drafts = {}; state.finalSegments = [];
+      document.getElementById('facts-content').style.display = 'none';
+      document.getElementById('facts-empty').style.display = 'block';
+      document.getElementById('facts-content').innerHTML = '';
+      document.getElementById('alerts-content').innerHTML = '<div class="empty-facts">No alerts generated yet.</div>';
+      document.getElementById('soap-content').innerHTML = '<div class="empty-facts">Click <strong>SOAP / AVS</strong> to generate the clinical note.</div>';
+      document.getElementById('facts-badge').style.display = 'none';
+      document.getElementById('alerts-badge').style.display = 'none';
+      document.getElementById('timer-display').textContent = '00:00';
+      document.getElementById('btn-pdf').disabled = true; document.getElementById('btn-soap').disabled = true;
+      state.soapGenerated = false; state.sessionId = null;
+      showToast('Session cleared');
+    }
+
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach((t, i) => { t.classList.toggle('active', ['facts', 'alerts', 'soap'][i] === name); });
+      document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+      document.getElementById(`tab-${name}`).classList.add('active');
+    }
+    function showEmptyState(show) { const e = document.getElementById('empty-state'); if (e) e.style.display = show ? 'flex' : 'none'; }
+    function roleClass(role) { const r = (role || '').toLowerCase(); if (r.includes('doctor') || r.includes('physician')) return 'doctor'; if (r.includes('patient')) return 'patient'; if (r.includes('nurse') || r.includes('guardian')) return 'nurse'; return 'unknown'; }
+    function roleIcon(role) { const r = (role || '').toLowerCase(); if (r.includes('doctor')) return '👨‍⚕️'; if (r.includes('patient')) return '🧑'; if (r.includes('nurse')) return '👩‍⚕️'; if (r.includes('guardian')) return '👪'; return '❓'; }
+    function fmtTime(secs) { if (secs == null || secs < 0) return ''; const m = Math.floor(secs / 60); const s = Math.floor(secs % 60); return `${m}:${String(s).padStart(2, '0')}`; }
+    function esc(str) { return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+    function floatToPCM16(f32) { const out = new Int16Array(f32.length); for (let i = 0; i < f32.length; i++) { const s = Math.max(-1, Math.min(1, f32[i])); out[i] = s < 0 ? s * 0x8000 : s * 0x7fff; } return out; }
+    function updateVU(f32) { const rms = Math.sqrt(f32.reduce((a, v) => a + v * v, 0) / f32.length); const level = Math.min(1, rms * 6); for (let i = 0; i < 7; i++) { const seg = document.getElementById(`vu-${i}`); const on = level > i / 7; seg.style.background = on ? (i < 5 ? '#2d7dd2' : i < 6 ? '#d4860a' : '#c0394a') : 'var(--border)'; seg.style.height = on ? `${8 + i * 2}px` : '4px'; } }
+    function resetVU() { for (let i = 0; i < 7; i++) { const seg = document.getElementById(`vu-${i}`); seg.style.background = 'var(--border)'; seg.style.height = '4px'; } }
+    const wCanvas = document.getElementById('waveform-bar'); const wCtx = wCanvas.getContext('2d'); let waveHistory = new Float32Array(600);
+    function drawWaveform(f32) { const w = wCanvas.offsetWidth || 600; wCanvas.width = w; wCanvas.height = 36; const rms = Math.sqrt(f32.reduce((a, v) => a + v * v, 0) / f32.length); const next = new Float32Array(w); next.set(waveHistory.slice(waveHistory.length - w + 1)); next[w - 1] = rms; waveHistory = next; const mid = 18; wCtx.clearRect(0, 0, w, 36);['rgba(45,125,210,0.7)', 'rgba(45,125,210,0.25)'].forEach((color, mirror) => { wCtx.beginPath(); wCtx.strokeStyle = color; wCtx.lineWidth = 1.5; for (let i = 0; i < w; i++) { const amp = waveHistory[i] * 36 * 3; const y = mirror ? mid + amp / 2 : mid - amp / 2; i === 0 ? wCtx.moveTo(i, y) : wCtx.lineTo(i, y); } wCtx.stroke(); }); }
+    let toastTimer; function showToast(msg, type) { const el = document.getElementById('toast'); el.textContent = msg; el.style.borderColor = type === 'error' ? 'var(--accent-rose)' : 'var(--border-bright)'; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 3200); }
+    window.addEventListener('resize', () => { wCanvas.width = wCanvas.offsetWidth; waveHistory = new Float32Array(wCanvas.offsetWidth || 600); });
+    setTimeout(() => { wCanvas.width = wCanvas.offsetWidth; waveHistory = new Float32Array(wCanvas.offsetWidth || 600); }, 120);
+  </script>
+</body>
+
+</html>
