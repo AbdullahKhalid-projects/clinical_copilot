@@ -1,0 +1,9 @@
+httpx
+python-dotenv
+mistralai
+setuptools<81
+webrtcvad
+fastapi
+uvicorn
+websockets
+reportlab
