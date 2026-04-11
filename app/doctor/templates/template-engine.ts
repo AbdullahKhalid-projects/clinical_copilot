@@ -23,10 +23,30 @@ export const templatePlaceholderHelp: Array<{ key: string; description: string }
   { key: "{{doctor_credentials}}", description: "Doctor credentials/degrees" },
   { key: "{{doctor_license_no}}", description: "Doctor license number" },
   { key: "{{doctor_signature}}", description: "Doctor signature text" },
+  { key: "{{patient_name}}", description: "Linked patient full name" },
+  { key: "{{patient_date_of_birth}}", description: "Linked patient date of birth (YYYY-MM-DD)" },
+  { key: "{{patient_id}}", description: "Linked patient profile id" },
+  { key: "{{visit_date}}", description: "Appointment visit date (YYYY-MM-DD)" },
 ];
 
-export function getTemplatePlaceholderMap(template: SoapTemplate): PlaceholderMap {
+export function getTemplatePlaceholderMap(
+  template: SoapTemplate,
+  dynamicValues?: Record<string, unknown>,
+): PlaceholderMap {
   const ctx = template.profileContext;
+
+  const dynamicPlaceholderValues: PlaceholderMap = Object.entries(dynamicValues ?? {}).reduce<PlaceholderMap>(
+    (acc, [key, value]) => {
+      if (value === undefined || value === null) {
+        acc[key.toLowerCase()] = "";
+        return acc;
+      }
+
+      acc[key.toLowerCase()] = String(value);
+      return acc;
+    },
+    {},
+  );
 
   return {
     hospital_logo: "",
@@ -39,6 +59,11 @@ export function getTemplatePlaceholderMap(template: SoapTemplate): PlaceholderMa
     doctor_credentials: ctx.doctorCredentials || "",
     doctor_license_no: ctx.doctorLicenseNo || "",
     doctor_signature: ctx.doctorSignature || "",
+    patient_name: "",
+    patient_date_of_birth: "",
+    patient_id: "",
+    visit_date: "",
+    ...dynamicPlaceholderValues,
   };
 }
 
@@ -203,11 +228,24 @@ export function buildEmptyBodyOutput(bodySchema: TemplateBodySchema): Record<str
 export function renderNotePreviewFromObject(
   template: SoapTemplate,
   llmObject: Record<string, unknown>,
+  dynamicPlaceholderValues?: Record<string, unknown>,
 ): string {
-  const placeholderValues = getTemplatePlaceholderMap(template);
+  const placeholderValues = getTemplatePlaceholderMap(template, dynamicPlaceholderValues);
 
   const resolvedHeader = resolveTemplateTextPlaceholders(template.header, placeholderValues);
   const resolvedFooter = resolveTemplateTextPlaceholders(template.footer, placeholderValues);
+
+  const patientDetailsLines = [
+    placeholderValues.patient_name ? `Name: ${placeholderValues.patient_name}` : "",
+    placeholderValues.patient_date_of_birth ? `DOB: ${placeholderValues.patient_date_of_birth}` : "",
+    placeholderValues.patient_id ? `Patient ID: ${placeholderValues.patient_id}` : "",
+    placeholderValues.visit_date ? `Visit Date: ${placeholderValues.visit_date}` : "",
+  ].filter((line) => line.length > 0);
+
+  const patientDetailsBlock =
+    patientDetailsLines.length > 0
+      ? `Patient Details:\n${patientDetailsLines.join("\n")}`
+      : "";
 
   const logoLine = template.profileContext.hospitalLogoUrl?.trim()
     ? `[Hospital Logo: ${template.profileContext.hospitalLogoUrl?.trim()}]`
@@ -217,7 +255,7 @@ export function renderNotePreviewFromObject(
     .map((field) => `${field.label}:\n${String(llmObject[field.key] ?? "")}`)
     .join("\n\n");
 
-  return [logoLine, resolvedHeader, body, resolvedFooter]
+  return [logoLine, resolvedHeader, patientDetailsBlock, body, resolvedFooter]
     .filter(Boolean)
     .join("\n\n")
     .replace(/\n{3,}/g, "\n\n")

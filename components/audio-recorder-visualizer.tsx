@@ -15,6 +15,9 @@ import { cn } from "@/lib/utils";
 type Props = {
   className?: string; // Not used as much now, but good to keep
   timerClassName?: string;
+  onStart?: (stream: MediaStream) => void;
+  onPauseChange?: (paused: boolean) => void;
+  onDiscard?: () => void;
   onStop: (blob: Blob) => void;
   isUploading: boolean;
 };
@@ -27,6 +30,9 @@ const padWithLeadingZeros = (num: number, length: number): string => {
 export const AudioRecorderWithVisualizer = ({
   className,
   timerClassName,
+  onStart,
+  onPauseChange,
+  onDiscard,
   onStop,
   isUploading
 }: Props) => {
@@ -69,6 +75,8 @@ export const AudioRecorderWithVisualizer = ({
   const timerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   function startRecording() {
+    if (isRecording) return;
+
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices
         .getUserMedia({
@@ -77,6 +85,7 @@ export const AudioRecorderWithVisualizer = ({
         .then((stream) => {
           setIsRecording(true);
           setIsPaused(false);
+          onPauseChange?.(false);
           // ============ Analyzing ============
           const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
           const audioCtx = new AudioContext();
@@ -98,6 +107,8 @@ export const AudioRecorderWithVisualizer = ({
             mediaRecorder,
             audioContext: audioCtx,
           };
+
+          onStart?.(stream);
 
           chunksRef.current = [];
           
@@ -131,6 +142,7 @@ export const AudioRecorderWithVisualizer = ({
     cleanupAudioResources();
     setIsRecording(false);
     setIsPaused(false);
+    onPauseChange?.(false);
     setTimer(0);
   }
 
@@ -141,9 +153,11 @@ export const AudioRecorderWithVisualizer = ({
       if (isPaused) {
           mediaRecorder.resume();
           setIsPaused(false);
+          onPauseChange?.(false);
       } else {
           mediaRecorder.pause();
           setIsPaused(true);
+          onPauseChange?.(true);
       }
   }
 
@@ -169,6 +183,23 @@ export const AudioRecorderWithVisualizer = ({
     }
   }
 
+  useEffect(() => {
+    return () => {
+      const { mediaRecorder } = mediaRecorderRef.current;
+
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.onstop = null;
+        try {
+          mediaRecorder.stop();
+        } catch (error) {
+          console.error("Error stopping recorder during unmount:", error);
+        }
+      }
+
+      cleanupAudioResources();
+    };
+  }, []);
+
   function resetRecording() {
      // Just stop without saving
      const { mediaRecorder } = mediaRecorderRef.current;
@@ -180,7 +211,10 @@ export const AudioRecorderWithVisualizer = ({
      cleanupAudioResources();
      setIsRecording(false);
      setIsPaused(false);
+    onPauseChange?.(false);
      setTimer(0);
+
+      onDiscard?.();
   }
 
   // Effect to update the timer every second
@@ -280,10 +314,11 @@ export const AudioRecorderWithVisualizer = ({
             // If paused, just draw static dots or keep last frame? 
             // Better to keep drawing but with 0 volume or specialized paused state
             if (isPaused) {
-                 // Zero out data for visual effect or just draw static
-                 // Let's just draw with current data but the drawDots handle color
-            } 
-            analyser.getByteFrequencyData(dataArray); 
+                dataArray.fill(0);
+                drawDots(dataArray);
+                return;
+              }
+              analyser.getByteFrequencyData(dataArray);
             drawDots(dataArray);
         };
 
@@ -315,7 +350,6 @@ export const AudioRecorderWithVisualizer = ({
                     // Start State: Default Button size/shape wrapper (will be filled by the Button below)
                     : "w-[180px] h-10 rounded-md cursor-pointer hover:shadow-md" 
             )}
-            onClick={!isRecording ? startRecording : undefined}
         >
             {/* Start Button Content (Visible when NOT recording) */}
             <div 
@@ -325,6 +359,8 @@ export const AudioRecorderWithVisualizer = ({
                 )}
             >
                 <Button 
+                  type="button"
+                  onClick={startRecording}
                     className={cn(
                     "w-full h-full gap-2 font-medium shadow-none rounded-md bg-[#CCFF0B] text-black hover:bg-[#B8E609]",
                         // Using default primary/secondary variants or specific classes to match theme

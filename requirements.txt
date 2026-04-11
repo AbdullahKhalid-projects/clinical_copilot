@@ -1,7 +1,0 @@
-httpx
-python-dotenv
-mistralai
-webrtcvad
-fastapi
-uvicorn
-reportlab

@@ -215,7 +215,7 @@ curl http://localhost:8000/health
 - **Header** should show green dot
 
 **If RED DOT in header:**
-- Backend not running → start `python main.py`
+- Backend not running → start `python python/main.py`
 - Firewall blocking → check localhost:8000
 - Wrong URL → should be http://localhost:8000
 
@@ -235,7 +235,7 @@ curl http://localhost:8000/health
 - Speak CLEARLY for better results
 
 **If NO MESSAGE after 15 seconds:**
-- Backend not processing → check main.py terminal
+- Backend not processing → check python/main.py terminal
 - Network blocked → check Network tab for errors
 - API key missing → check .env file for MISTRAL_API_KEY
 
@@ -273,7 +273,7 @@ Should NOT see: ❌ JSON error responses or sudden closure
 
 Before testing, verify:
 
-- [ ] Backend running: `python main.py` (port 8000)
+- [ ] Backend running: `python python/main.py` (port 8000)
 - [ ] Frontend running: `npm run dev` (port 3000)
 - [ ] Can see http://localhost:3000
 - [ ] Green connect indicator in header

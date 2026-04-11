@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 
+import { templatePlaceholderHelp } from "../../template-engine";
 import type { SoapTemplate } from "../../types";
 import type { StructurePanelProps } from "./types";
 
@@ -182,6 +183,26 @@ export function StructurePanel({
                   />
                 </div>
               ))}
+          </div>
+        </div>
+
+        <Separator />
+
+        <div className="space-y-3">
+          <p className="text-sm font-medium">Available Placeholders</p>
+          <p className="text-xs text-muted-foreground">
+            Use these tokens in header/footer text templates. They are resolved when rendering the final note.
+          </p>
+
+          <div className="rounded-lg border bg-muted/20 p-3">
+            <div className="grid gap-2 md:grid-cols-2">
+              {templatePlaceholderHelp.map((placeholder) => (
+                <div key={placeholder.key} className="rounded border bg-background px-2 py-1.5">
+                  <p className="font-mono text-xs text-foreground">{placeholder.key}</p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">{placeholder.description}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </CardContent>

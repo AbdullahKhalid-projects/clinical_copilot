@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { 
+import {
   Plus, 
   MoreHorizontal, 
   ArrowUpDown, 
@@ -10,7 +10,9 @@ import {
   Check,
   User,
   UserMinus,
-  Users
+  Users,
+  Link2,
+  Loader2
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
@@ -42,6 +44,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useToast } from "@/hooks/use-toast";
+import { linkPatientToAppointment } from "../clinical-session/actions";
 
 interface Patient {
   id: string;
@@ -57,12 +61,28 @@ interface Patient {
   condition: string | null;
 }
 
-export default function PatientsClient({ patients }: { patients: Patient[] }) {
+type LinkModeConfig = {
+  enabled: boolean;
+  appointmentId: string;
+  returnTo: string;
+};
+
+export default function PatientsClient({
+  patients,
+  linkMode,
+}: {
+  patients: Patient[];
+  linkMode?: LinkModeConfig;
+}) {
   const router = useRouter();
+  const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [genderFilter, setGenderFilter] = useState<string | null>(null);
   const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
+  const [linkingPatientId, setLinkingPatientId] = useState<string | null>(null);
+
+  const isLinkMode = Boolean(linkMode?.enabled && linkMode?.appointmentId);
 
   const filteredPatients = patients.filter((patient) => {
       const matchesSearch = 
@@ -83,7 +103,45 @@ export default function PatientsClient({ patients }: { patients: Patient[] }) {
   });
 
   const handlePatientClick = (id: string) => {
+    if (isLinkMode) {
+      return;
+    }
     router.push(`/doctor/patients/${id}`);
+  };
+
+  const handleLinkPatient = async (patientId: string) => {
+    if (!linkMode?.appointmentId || linkingPatientId) {
+      return;
+    }
+
+    setLinkingPatientId(patientId);
+    try {
+      const result = await linkPatientToAppointment(linkMode.appointmentId, patientId);
+      if (!result.success) {
+        toast({
+          title: "Link failed",
+          description: result.error || "Could not link patient to this session.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Patient linked",
+        description: "Returning to clinical session.",
+      });
+
+      router.push(linkMode.returnTo || `/doctor/clinical-session/${linkMode.appointmentId}`);
+    } catch (error) {
+      console.error("Failed to link patient", error);
+      toast({
+        title: "Link failed",
+        description: "Could not link patient to this session.",
+        variant: "destructive",
+      });
+    } finally {
+      setLinkingPatientId(null);
+    }
   };
 
   const formatDate = (date: Date | null) => {
@@ -124,14 +182,16 @@ export default function PatientsClient({ patients }: { patients: Patient[] }) {
                   <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">Directory</Badge>
                 </div>
                 <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
-                  View your patients, and their details
+                  {isLinkMode ? "Select a patient to link to this clinical session" : "View your patients, and their details"}
                 </span>
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              <Button className="bg-[#3e2b2b] hover:bg-[#2e1b1b] text-white">
-                <Plus className="mr-2 h-4 w-4" /> New patient
-              </Button>
+              {!isLinkMode && (
+                <Button className="bg-[#3e2b2b] hover:bg-[#2e1b1b] text-white">
+                  <Plus className="mr-2 h-4 w-4" /> New patient
+                </Button>
+              )}
             </div>
           </div>
 
@@ -145,6 +205,15 @@ export default function PatientsClient({ patients }: { patients: Patient[] }) {
               <CalendarIcon className="h-3.5 w-3.5" />
               {upcomingCount} Upcoming
             </Badge>
+            {isLinkMode && (
+              <Badge
+                variant="outline"
+                className="gap-1.5 py-1 px-2.5 border-2 border-blue-300 bg-blue-100/80 text-blue-900 font-medium"
+              >
+                <Link2 className="h-3.5 w-3.5" />
+                Link Mode
+              </Badge>
+            )}
           </div>
         </div>
       </header>
@@ -313,7 +382,17 @@ export default function PatientsClient({ patients }: { patients: Patient[] }) {
                  <TableHead className="text-zinc-800 font-semibold">Gender</TableHead>
                  <TableHead className="text-zinc-800 font-semibold">Status</TableHead>
                  <TableHead className="text-zinc-800 font-semibold">Last Visit</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
+                <TableHead className="w-[170px] px-4 text-zinc-800 font-semibold">
+                  {isLinkMode ? (
+                    <div className="flex justify-end">
+                      <span className="inline-flex w-[84px] justify-center">Action</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-end">
+                      <span className="inline-flex w-8 justify-center">Action</span>
+                    </div>
+                  )}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -321,7 +400,7 @@ export default function PatientsClient({ patients }: { patients: Patient[] }) {
                 filteredPatients.map((patient) => (
                   <TableRow
                     key={patient.id}
-                    className="cursor-pointer"
+                    className={isLinkMode ? "" : "cursor-pointer"}
                     onClick={() => handlePatientClick(patient.id)}
                   >
                     <TableCell onClick={(e) => e.stopPropagation()}>
@@ -349,22 +428,48 @@ export default function PatientsClient({ patients }: { patients: Patient[] }) {
                     <TableCell>
                         {formatDate(patient.lastVisit)}
                     </TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                    <span className="sr-only">Open menu</span>
-                                    <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                                <DropdownMenuItem onClick={() => handlePatientClick(patient.id)}>View Details</DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem>Edit Patient</DropdownMenuItem>
-                                <DropdownMenuItem className="text-destructive">Delete Patient</DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                    <TableCell onClick={(e) => e.stopPropagation()} className="w-[170px] px-4">
+                      <div className="flex justify-end">
+                        {isLinkMode ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-8 w-[84px] justify-center rounded-md border border-black bg-black px-3 text-white font-semibold hover:bg-stone-800 hover:text-white"
+                            disabled={Boolean(linkingPatientId)}
+                            onClick={() => {
+                              void handleLinkPatient(patient.id);
+                            }}
+                          >
+                            {linkingPatientId === patient.id ? (
+                              <>
+                                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                                Linking
+                              </>
+                            ) : (
+                              <>
+                                <Link2 className="mr-1 h-3.5 w-3.5" />
+                                Link
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" className="h-8 w-8 p-0">
+                                      <span className="sr-only">Open menu</span>
+                                      <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                  <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                  <DropdownMenuItem onClick={() => handlePatientClick(patient.id)}>View Details</DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem>Edit Patient</DropdownMenuItem>
+                                  <DropdownMenuItem className="text-destructive">Delete Patient</DropdownMenuItem>
+                              </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

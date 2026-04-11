@@ -2,7 +2,7 @@
 
 ## 🎯 What Was Integrated
 
-Your Python clinical pipeline (`main.py`) has been **fully integrated** into the Next.js application at `/app/doctor/clinical-session/page.tsx`
+Your Python clinical pipeline (`python/main.py`) has been **fully integrated** into the Next.js application at `/app/doctor/clinical-session/page.tsx`
 
 ### What's Connected
 ✅ Real-time audio recording → Python backend  
@@ -22,7 +22,7 @@ Your Python clinical pipeline (`main.py`) has been **fully integrated** into the
 ```bash
 cd "/Users/Abdullah/Desktop/fyp code/clinical_co-pilot"
 source venv/bin/activate
-python main.py
+python python/main.py
 ```
 **Expected**: `INFO: Uvicorn running on http://0.0.0.0:8000`
 
@@ -130,7 +130,7 @@ Browser Microphone
 
 ## ⚙️ Configuration
 
-### Backend (`main.py`)
+### Backend (`python/main.py`)
 - **Port**: 8000
 - **CORS**: Enabled (all origins)
 - **API Keys Needed**:
@@ -153,7 +153,7 @@ Browser Microphone
 lsof -i :8000
 
 # If not, start it
-python main.py
+python python/main.py
 ```
 
 ### "Cannot record audio"

@@ -4,7 +4,7 @@
 
 **App Status**: 🟢 **Running**  
 **Dev Server**: http://localhost:3000  
-**Backend Required**: http://localhost:8000 (main.py)  
+**Backend Required**: http://localhost:8000 (python/main.py)  
 **Build Status**: ✅ No errors  
 
 ```
@@ -69,7 +69,7 @@ Before testing, ensure both services are running:
 # Terminal 1: Start Backend
 cd "/Users/Abdullah/Desktop/fyp code/clinical_co-pilot"
 source venv/bin/activate
-python main.py
+python python/main.py
 # Should show: Application startup complete [uvicorn]
 # Listening on http://127.0.0.1:8000
 
@@ -378,7 +378,7 @@ lsof -i :8000
 
 ## 📞 Support Information
 
-**Backend Service**: `main.py` on port 8000  
+**Backend Service**: `python/main.py` on port 8000  
 - WebSocket: `ws://localhost:8000/ws/transcribe/v2`
 - Docs: http://localhost:8000/docs
 - Health: http://localhost:8000/health (if implemented)

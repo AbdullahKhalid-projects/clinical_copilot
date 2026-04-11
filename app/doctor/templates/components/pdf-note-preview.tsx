@@ -215,7 +215,7 @@ export function NoteDocument({ template, llmObject }: PdfNotePreviewProps) {
           <View style={styles.verticalDivider} />
           <View style={styles.patientGroup}>
             <Text style={styles.label}>DOB</Text>
-            <Text style={styles.value}>{formatVal(llmObject.date_of_birth || llmObject.dob)}</Text>
+            <Text style={styles.value}>{formatVal(llmObject.patient_date_of_birth || llmObject.date_of_birth || llmObject.dob)}</Text>
           </View>
           <View style={styles.verticalDivider} />
           <View style={styles.patientGroup}>

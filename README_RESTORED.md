@@ -25,7 +25,7 @@ Your clinical session page now has the proper layout structure:
 └─────────────┴──────────────────────┴─────────────────────┘
 ```
 
-### ✅ Connected Real-Time Transcription from main.py
+### ✅ Connected Real-Time Transcription from python/main.py
 
 Your WebSocket hook (`use-clinical-websocket.ts`) now properly displays:
 
@@ -78,7 +78,7 @@ Your WebSocket hook (`use-clinical-websocket.ts`) now properly displays:
 ### ✅ Status Indicators
 
 **Header Connection Status**
-- 🟢 Green dot = Connected to backend (main.py on port 8000)
+- 🟢 Green dot = Connected to backend (python/main.py on port 8000)
 - 🔴 Red dot = Disconnected (needs reconnect)
 - Shows "Connected | Session: ABC123..." when active
 
@@ -112,7 +112,7 @@ Your WebSocket hook (`use-clinical-websocket.ts`) now properly displays:
 ```bash
 cd "/Users/Abdullah/Desktop/fyp code/clinical_co-pilot"
 source venv/bin/activate
-python main.py
+python python/main.py
 # Shows: "Application startup complete [uvicorn]"
 # On port: 8000
 ```
@@ -160,7 +160,7 @@ Audio Input (Microphone)
     ↓
 PCM Chunks Sent to Backend (WebSocket)
     ↓
-Backend Processing (main.py)
+Backend Processing (python/main.py)
     ├─ VAD Detection (local)
     ├─ Draft Transcription (9-12s) → transcript_draft ✅
     ├─ Diarization (30s) → transcript_final ✅
@@ -256,7 +256,7 @@ User Sees Real-Time Updates ✅
 ### Unchanged Files
 ✅ `hooks/use-clinical-websocket.ts` - Working perfectly
 ✅ `components/soap-avs-dialog.tsx` - Unchanged
-✅ `main.py` - Backend unchanged
+✅ `python/main.py` - Backend unchanged
 ✅ All other components - Unaffected
 
 ### Documentation Created
@@ -333,13 +333,13 @@ curl http://localhost:8000/docs
 curl http://localhost:3000
 
 # View Backend Logs
-# Look at terminal running "python main.py"
+# Look at terminal running "python python/main.py"
 
 # View Frontend Logs
 # Press F12 → Console tab in browser
 
 # Restart Both Services
-# Backend: Ctrl+C, then python main.py
+# Backend: Ctrl+C, then python python/main.py
 # Frontend: Ctrl+C, then npm run dev
 
 # View All Hospital Data
@@ -369,7 +369,7 @@ lsof -i :3000  # Frontend
 Your clinical session page is now:
 
 ✨ **Fully restored** with 3-column layout  
-✨ **Connected** to real-time WebSocket data from main.py  
+✨ **Connected** to real-time WebSocket data from python/main.py  
 ✨ **Displaying** draft & finalized transcriptions properly  
 ✨ **Showing** facts, timeline, alerts, and medications in sidebar  
 ✨ **Production-ready** for full testing and deployment

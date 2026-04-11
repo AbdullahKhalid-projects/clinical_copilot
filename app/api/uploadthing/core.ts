@@ -16,7 +16,7 @@ export const ourFileRouter = {
   // Define as many FileRoutes as you like, each with a unique routeSlug
   
   // Endpoint specifically for audio recordings (MP3/WAV from browser)
-  audioUploader: f({ audio: { maxFileSize: "16MB" } })
+  audioUploader: f({ audio: { maxFileSize: "64MB" } })
     .input(z.object({ appointmentId: z.string().uuid() }))
     .middleware(async ({ input }) => {
       const auth = await handleAuth();
@@ -56,7 +56,7 @@ export const ourFileRouter = {
         data: {
           recordingUrl,
           status: appointment.patientId ? "IN_PROGRESS" : "UNLINKED",
-          aiStatus: "PROCESSING",
+          aiStatus: "UPLOADED",
         },
       });
 

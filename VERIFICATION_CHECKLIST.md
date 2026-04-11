@@ -155,7 +155,7 @@ Before starting a session, verify:
 ```bash
 # 1. Restart backend
 cd "/Users/Abdullah/Desktop/fyp code/clinical_co-pilot"
-python main.py
+python python/main.py
 
 # 2. Check microphone input
 # Settings → Privacy → Microphone → Enable for localhost:3000
@@ -176,7 +176,7 @@ python main.py
 curl http://localhost:8000/health
 
 # If not running:
-python main.py
+python python/main.py
 
 # Should show: "Application startup complete [uvicorn]"
 ```
@@ -334,7 +334,7 @@ npm run build
 
 ### View Backend Logs
 ```bash
-# Terminal with main.py running
+# Terminal with python/main.py running
 # Scroll up to see logs
 # Look for:
 # - "Start by importing your Prisma Client"
@@ -387,7 +387,7 @@ Columns will:
 
 6. **Restart both services** if something feels stuck:
    ```bash
-   # Backend: Ctrl+C then python main.py
+   # Backend: Ctrl+C then python python/main.py
    # Frontend: Ctrl+C then npm run dev
    ```
 
@@ -410,11 +410,11 @@ Columns will:
 **If connection shows red:**
 1. Verify backend running: `curl http://localhost:8000/health`
 2. Check console for error
-3. Restart backend: `python main.py`
+3. Restart backend: `python python/main.py`
 
 **If everything stuck:**
 1. Stop frontend: Ctrl+C, then `npm run dev`
-2. Stop backend: Ctrl+C, then `python main.py`
+2. Stop backend: Ctrl+C, then `python python/main.py`
 3. Refresh browser: Cmd+R (Mac) or Ctrl+R (Windows)
 4. Select patient again
 

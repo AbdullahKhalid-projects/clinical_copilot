@@ -58,15 +58,16 @@ export const useClinicalWebSocket = (backendUrl: string = "ws://localhost:8000")
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const connectPromiseRef = useRef<Promise<void> | null>(null);
+  const connectPromiseRef = useRef<Promise<boolean> | null>(null);
+  const shouldReconnectRef = useRef(true);
 
   // Connect to WebSocket - PROPERLY WAITS FOR CONNECTION
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (): Promise<boolean> => {
     // If already connected, return immediately
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       console.log("Already connected");
       setConnected(true);
-      return;
+      return true;
     }
 
     // If connection is in progress, wait for it
@@ -76,17 +77,22 @@ export const useClinicalWebSocket = (backendUrl: string = "ws://localhost:8000")
     }
 
     // Create new connection promise
-    const connectionPromise = new Promise<void>((resolve, reject) => {
+    const connectionPromise = new Promise<boolean>((resolve) => {
       try {
+        shouldReconnectRef.current = true;
         const wsUrl = `${backendUrl.replace("http://", "ws://").replace("https://", "wss://")}/ws/transcribe/v2`;
         console.log("Creating WebSocket connection to:", wsUrl);
         const ws = new WebSocket(wsUrl);
 
         // Set a timeout - if no connection after 10 seconds, reject
         const timeout = setTimeout(() => {
-          ws.close();
+          try {
+            ws.close();
+          } catch (closeError) {
+            console.error("Error closing websocket after timeout:", closeError);
+          }
           connectPromiseRef.current = null;
-          reject(new Error("WebSocket connection timeout"));
+          resolve(false);
         }, 10000);
 
         ws.onopen = () => {
@@ -96,13 +102,21 @@ export const useClinicalWebSocket = (backendUrl: string = "ws://localhost:8000")
           setError(null);
           wsRef.current = ws;
           connectPromiseRef.current = null;
-          resolve();
+          resolve(true);
         };
 
         ws.onmessage = (event) => {
           try {
             const message: WebSocketMessage = JSON.parse(event.data);
             handleMessage(message);
+            if (message.type === "session_stopped") {
+              shouldReconnectRef.current = false;
+              try {
+                ws.close();
+              } catch (closeError) {
+                console.error("Error closing WebSocket after session stop:", closeError);
+              }
+            }
           } catch (e) {
             console.error("Failed to parse WebSocket message:", e);
           }
@@ -110,28 +124,43 @@ export const useClinicalWebSocket = (backendUrl: string = "ws://localhost:8000")
 
         ws.onerror = (event) => {
           clearTimeout(timeout);
-          console.error("❌ WebSocket error:", event);
-          setError("WebSocket connection error");
+          if (shouldReconnectRef.current) {
+            console.error("❌ WebSocket error:", event);
+          } else {
+            console.warn("WebSocket closed during teardown");
+          }
+          if (shouldReconnectRef.current) {
+            setError("WebSocket connection error");
+          }
           setConnected(false);
+          wsRef.current = null;
           connectPromiseRef.current = null;
-          reject(new Error("WebSocket error"));
+          resolve(false);
         };
 
         ws.onclose = () => {
           clearTimeout(timeout);
           console.log("WebSocket disconnected");
           setConnected(false);
+          wsRef.current = null;
           connectPromiseRef.current = null;
-          // Attempt to reconnect after 3 seconds
-          reconnectTimeoutRef.current = setTimeout(() => {
-            connect();
-          }, 3000);
+          if (shouldReconnectRef.current) {
+            // Attempt to reconnect after 3 seconds
+            reconnectTimeoutRef.current = setTimeout(() => {
+              void connect().catch((error) => {
+                console.warn("WebSocket reconnect failed:", error);
+              });
+            }, 3000);
+          }
+          if (connectPromiseRef.current) {
+            resolve(false);
+          }
         };
       } catch (e) {
         console.error("Failed to create WebSocket:", e);
         setError("Failed to connect to backend");
         connectPromiseRef.current = null;
-        reject(e);
+        resolve(false);
       }
     });
 
@@ -215,21 +244,17 @@ export const useClinicalWebSocket = (backendUrl: string = "ws://localhost:8000")
   const stopSession = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try {
+        shouldReconnectRef.current = false;
         wsRef.current.send(JSON.stringify({ action: "stop" }));
       } catch (e) {
         console.error("Error sending stop signal:", e);
       }
-      // Close the connection after a short delay to let stop signal be sent
-      setTimeout(() => {
-        if (wsRef.current) {
-          wsRef.current.close();
-        }
-      }, 100);
     }
   }, []);
 
   // Disconnect
   const disconnect = useCallback(() => {
+    shouldReconnectRef.current = false;
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
     }

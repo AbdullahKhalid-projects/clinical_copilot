@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Calendar,
@@ -13,6 +14,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { createNewAppointmentSession } from "@/app/actions/doctorActions";
 
 interface DashboardData {
   doctor: {
@@ -40,10 +42,27 @@ interface DashboardData {
 
 export default function DashboardClient({ initialData }: { initialData: DashboardData }) {
   const router = useRouter();
+  const [isStartingSession, setIsStartingSession] = useState(false);
 
-  const handleStartSession = () => {
-    router.push("/doctor/clinical-session");
-    // If we want to start with the next appointment, we could pick it here
+  const handleStartSession = async () => {
+    if (isStartingSession) return;
+
+    setIsStartingSession(true);
+
+    try {
+      const result = await createNewAppointmentSession();
+      if (result.success && result.appointmentId) {
+        router.push(`/doctor/clinical-session/${result.appointmentId}`);
+        return;
+      }
+
+      alert(result.error || "Failed to create a new session.");
+    } catch (error) {
+      console.error("Failed to start session", error);
+      alert("Failed to start a new session.");
+    } finally {
+      setIsStartingSession(false);
+    }
   };
 
   const handleRequestLeave = () => {
@@ -78,7 +97,7 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              <Button onClick={handleStartSession} className="bg-[#3e2b2b] hover:bg-[#2e1b1b] text-white">
+              <Button onClick={handleStartSession} className="bg-[#3e2b2b] hover:bg-[#2e1b1b] text-white" disabled={isStartingSession}>
                 <Play className="mr-2 h-4 w-4" /> Start Session
               </Button>
             </div>
@@ -115,6 +134,7 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
               <Button
                 onClick={handleStartSession}
                 className="w-full justify-start gap-2 h-12"
+                disabled={isStartingSession}
               >
                 <Play className="w-5 h-5" />
                 Start Clinical Session

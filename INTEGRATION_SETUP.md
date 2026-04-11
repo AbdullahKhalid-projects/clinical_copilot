@@ -9,7 +9,7 @@ This document provides step-by-step instructions to run both the **Python backen
 ## Architecture
 
 ### Backend (Python)
-- **File**: `main.py`
+- **File**: `python/main.py`
 - **Framework**: FastAPI
 - **Port**: `8000` (default)
 - **Features**:
@@ -63,10 +63,10 @@ python3 -m venv venv
 source venv/bin/activate
 
 # Install dependencies
-pip install -r requirements.txt
+pip install -r python/requirements.txt
 ```
 
-**If `requirements.txt` doesn't exist, install manually:**
+**If `python/requirements.txt` doesn't exist, install manually:**
 
 ```bash
 pip install fastapi
@@ -74,6 +74,7 @@ pip install uvicorn
 pip install mistralai
 pip install python-dotenv
 pip install httpx
+pip install "setuptools<81"
 pip install webrtcvad
 pip install reportlab
 ```
@@ -128,7 +129,7 @@ The project should already have Tailwind CSS configured in:
 ```bash
 cd /Users/abdullah/Desktop/fyp\ code/clinical_co-pilot
 source venv/bin/activate  # Activate virtual environment
-python main.py
+python python/main.py
 ```
 
 **Expected Output:**
@@ -162,7 +163,7 @@ If you want to create a Makefile for easier management:
 .PHONY: dev backend frontend clean
 
 backend:
-	source venv/bin/activate && python main.py
+  source venv/bin/activate && python python/main.py
 
 frontend:
 	npm run dev
@@ -170,8 +171,8 @@ frontend:
 dev: backend frontend
 
 clean:
-	deactivate 2>/dev/null || true
-	pkill -f "python main.py" || true
+  deactivate 2>/dev/null || true
+  pkill -f "python python/main.py" || true
 	pkill -f "next dev" || true
 ```
 
@@ -253,7 +254,7 @@ Once both services are running:
 lsof -i :8000
 
 # If not running, start it
-python main.py
+python python/main.py
 
 # If port 8000 is in use, kill the process
 kill -9 $(lsof -t -i :8000)
@@ -302,8 +303,8 @@ cat .env | grep MISTRAL_API_KEY
 echo "MISTRAL_API_KEY=your_key_here" >> .env
 
 # Restart backend
-pkill -f "python main.py"
-python main.py
+pkill -f "python python/main.py"
+python python/main.py
 ```
 
 ### Issue: "Port 3000 or 8000 already in use"
@@ -316,7 +317,7 @@ kill -9 <PID>
 
 # Or use alternative port
 NEXT_PUBLIC_PORT=3001 npm run dev
-PORT=8001 python main.py
+PORT=8001 python python/main.py
 ```
 
 ---
@@ -325,7 +326,9 @@ PORT=8001 python main.py
 
 ```
 clinical_co-pilot/
-├── main.py                          # Python backend
+├── python/
+│   ├── main.py                      # Python backend
+│   └── requirements.txt             # Python dependencies
 ├── index.html                       # Original HTML template (reference)
 ├── .env                             # Environment variables (DO NOT COMMIT)
 ├── .env.local                       # Local environment variables
@@ -411,7 +414,7 @@ NEXT_PUBLIC_API_URL=https://api.yourdomain.com  # Backend URL
 
 **Backend**:
 ```python
-# In main.py, around line 20
+# In python/main.py, around line 20
 logging.basicConfig(level=logging.DEBUG)  # Change from INFO to DEBUG
 ```
 

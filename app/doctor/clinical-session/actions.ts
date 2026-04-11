@@ -31,6 +31,171 @@ async function getCurrentDoctor() {
   return doctor;
 }
 
+function hasTranscriptContent(rawTranscript: unknown): boolean {
+  if (Array.isArray(rawTranscript)) {
+    return rawTranscript.some((segment) => {
+      if (!segment || typeof segment !== "object") {
+        return false;
+      }
+
+      const text = (segment as { text?: unknown }).text;
+      return typeof text === "string" && text.trim().length > 0;
+    });
+  }
+
+  if (typeof rawTranscript === "string") {
+    return rawTranscript.trim().length > 0;
+  }
+
+  return false;
+}
+
+function hasGeneratedNote(rawSoapNote: unknown): boolean {
+  if (!rawSoapNote || typeof rawSoapNote !== "object" || Array.isArray(rawSoapNote)) {
+    return false;
+  }
+
+  const payload = rawSoapNote as {
+    noteText?: unknown;
+    noteData?: unknown;
+    subjective?: unknown;
+    objective?: unknown;
+    assessment?: unknown;
+    plan?: unknown;
+  };
+
+  if (typeof payload.noteText === "string" && payload.noteText.trim().length > 0) {
+    return true;
+  }
+
+  if (payload.noteData && typeof payload.noteData === "object" && !Array.isArray(payload.noteData)) {
+    return Object.values(payload.noteData as Record<string, unknown>).some((value) => {
+      if (typeof value === "string") {
+        return value.trim().length > 0;
+      }
+
+      if (typeof value === "number") {
+        return true;
+      }
+
+      if (typeof value === "boolean") {
+        return value;
+      }
+
+      return false;
+    });
+  }
+
+  return [payload.subjective, payload.objective, payload.assessment, payload.plan].some(
+    (section) => typeof section === "string" && section.trim().length > 0,
+  );
+}
+
+export type FinalizeChecklist = {
+  patientLinked: boolean;
+  transcriptReady: boolean;
+  noteReady: boolean;
+};
+
+export type FinalizeTaskKey = keyof FinalizeChecklist;
+
+export type FinalizeChecklistBlocker = {
+  key: FinalizeTaskKey;
+  title: string;
+  description: string;
+  actionLabel: string;
+};
+
+export type FinalizeChecklistProgress = {
+  completed: number;
+  total: number;
+};
+
+export type FinalizeChecklistResult = {
+  success: boolean;
+  checklist: FinalizeChecklist;
+  canFinalize: boolean;
+  blockers: FinalizeChecklistBlocker[];
+  progress: FinalizeChecklistProgress;
+  currentStatus?: string;
+  aiStatus?: string | null;
+  error?: string;
+};
+
+const EMPTY_FINALIZE_CHECKLIST: FinalizeChecklist = {
+  patientLinked: false,
+  transcriptReady: false,
+  noteReady: false,
+};
+
+function buildFinalizeChecklist(appointment: {
+  patientId: string | null;
+  transcript: unknown;
+  soapNote: unknown;
+}): FinalizeChecklist {
+  return {
+    patientLinked: Boolean(appointment.patientId),
+    transcriptReady: hasTranscriptContent(appointment.transcript),
+    noteReady: hasGeneratedNote(appointment.soapNote),
+  };
+}
+
+function canFinalizeFromChecklist(checklist: FinalizeChecklist): boolean {
+  return checklist.patientLinked && checklist.transcriptReady && checklist.noteReady;
+}
+
+function buildFinalizeChecklistBlockers(
+  checklist: FinalizeChecklist,
+  aiStatus: string | null | undefined,
+): FinalizeChecklistBlocker[] {
+  const blockers: FinalizeChecklistBlocker[] = [];
+
+  if (!checklist.patientLinked) {
+    blockers.push({
+      key: "patientLinked",
+      title: "Link a patient",
+      description: "Attach this session to the correct patient profile before completion.",
+      actionLabel: "Link Patient",
+    });
+  }
+
+  if (!checklist.transcriptReady) {
+    let transcriptDescription = "Record or upload audio, then confirm transcription in the Transcript tab.";
+
+    if (aiStatus === "PROCESSING") {
+      transcriptDescription = "Transcription is still processing. Wait for completion, then refresh this checklist.";
+    } else if (aiStatus === "FAILED") {
+      transcriptDescription = "Transcription failed. Re-upload audio or retry transcription before finalizing.";
+    }
+
+    blockers.push({
+      key: "transcriptReady",
+      title: "Generate transcript",
+      description: transcriptDescription,
+      actionLabel: "Go to Transcript",
+    });
+  }
+
+  if (!checklist.noteReady) {
+    blockers.push({
+      key: "noteReady",
+      title: "Generate visit note",
+      description: "Create and review a template note in the Note tab before finalizing.",
+      actionLabel: "Go to Note",
+    });
+  }
+
+  return blockers;
+}
+
+function buildFinalizeChecklistProgress(checklist: FinalizeChecklist): FinalizeChecklistProgress {
+  const completed = [checklist.patientLinked, checklist.transcriptReady, checklist.noteReady].filter(Boolean).length;
+  return {
+    completed,
+    total: 3,
+  };
+}
+
 export async function getClinicalSessionData(appointmentId: string) {
   const doctor = await getCurrentDoctor();
 
@@ -309,6 +474,139 @@ export async function unlinkPatientFromAppointment(appointmentId: string) {
       ...updatedAppointment,
       patientImageUrl: "",
     },
+  };
+}
+
+export async function getAppointmentFinalizeChecklist(appointmentId: string): Promise<FinalizeChecklistResult> {
+  const doctor = await getCurrentDoctor();
+  if (!doctor) {
+    return {
+      success: false,
+      checklist: EMPTY_FINALIZE_CHECKLIST,
+      canFinalize: false,
+      blockers: [],
+      progress: buildFinalizeChecklistProgress(EMPTY_FINALIZE_CHECKLIST),
+      error: "Doctor profile not found",
+    };
+  }
+
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      doctorId: doctor.id,
+    },
+    select: {
+      id: true,
+      status: true,
+      aiStatus: true,
+      patientId: true,
+      transcript: true,
+      soapNote: true,
+    },
+  });
+
+  if (!appointment) {
+    return {
+      success: false,
+      checklist: EMPTY_FINALIZE_CHECKLIST,
+      canFinalize: false,
+      blockers: [],
+      progress: buildFinalizeChecklistProgress(EMPTY_FINALIZE_CHECKLIST),
+      error: "Appointment not found",
+    };
+  }
+
+  const checklist = buildFinalizeChecklist(appointment);
+  const blockers = buildFinalizeChecklistBlockers(checklist, appointment.aiStatus);
+  const progress = buildFinalizeChecklistProgress(checklist);
+
+  return {
+    success: true,
+    checklist,
+    canFinalize: canFinalizeFromChecklist(checklist),
+    blockers,
+    progress,
+    currentStatus: appointment.status,
+    aiStatus: appointment.aiStatus,
+  };
+}
+
+export async function finalizeAppointmentSession(appointmentId: string): Promise<FinalizeChecklistResult> {
+  const doctor = await getCurrentDoctor();
+  if (!doctor) {
+    return {
+      success: false,
+      checklist: EMPTY_FINALIZE_CHECKLIST,
+      canFinalize: false,
+      blockers: [],
+      progress: buildFinalizeChecklistProgress(EMPTY_FINALIZE_CHECKLIST),
+      error: "Doctor profile not found",
+    };
+  }
+
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      doctorId: doctor.id,
+    },
+    select: {
+      id: true,
+      status: true,
+      aiStatus: true,
+      patientId: true,
+      transcript: true,
+      soapNote: true,
+    },
+  });
+
+  if (!appointment) {
+    return {
+      success: false,
+      checklist: EMPTY_FINALIZE_CHECKLIST,
+      canFinalize: false,
+      blockers: [],
+      progress: buildFinalizeChecklistProgress(EMPTY_FINALIZE_CHECKLIST),
+      error: "Appointment not found",
+    };
+  }
+
+  const checklist = buildFinalizeChecklist(appointment);
+  const blockers = buildFinalizeChecklistBlockers(checklist, appointment.aiStatus);
+  const progress = buildFinalizeChecklistProgress(checklist);
+  const canFinalize = canFinalizeFromChecklist(checklist);
+
+  if (!canFinalize) {
+    return {
+      success: false,
+      checklist,
+      canFinalize: false,
+      blockers,
+      progress,
+      currentStatus: appointment.status,
+      aiStatus: appointment.aiStatus,
+      error: "Complete all required tasks before finalizing this clinical session.",
+    };
+  }
+
+  await prisma.appointment.update({
+    where: { id: appointment.id },
+    data: {
+      status: "COMPLETED",
+    },
+  });
+
+  revalidatePath(`/doctor/clinical-session/${appointment.id}`);
+  revalidatePath("/doctor/clinical-session");
+  revalidatePath("/doctor/dashboard");
+
+  return {
+    success: true,
+    checklist,
+    canFinalize: true,
+    blockers: [],
+    progress,
+    currentStatus: "COMPLETED",
+    aiStatus: appointment.aiStatus,
   };
 }
 

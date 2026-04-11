@@ -18,7 +18,7 @@ export default function ClinicalSessionNotFound() {
               <Link href="/doctor/dashboard">Go to Dashboard</Link>
             </Button>
             <Button asChild variant="outline">
-              <Link href="/doctor/clinical-session">Back to Clinical Sessions</Link>
+              <Link href="/doctor/dashboard">Back to Dashboard</Link>
             </Button>
           </div>
         </CardContent>

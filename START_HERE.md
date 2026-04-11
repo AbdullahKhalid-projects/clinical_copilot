@@ -4,7 +4,7 @@
 
 ✅ **3-column layout** restored (Recording | Transcription | Sidebar)  
 ✅ **Patient timeline, alerts, medications** all visible  
-✅ **Real-time transcriptions** connected to main.py  
+✅ **Real-time transcriptions** connected to python/main.py  
 ✅ **Frontend running** on http://localhost:3000  
 ✅ **Ready to test** - just start backend!
 
@@ -16,7 +16,7 @@
 ```bash
 cd "/Users/Abdullah/Desktop/fyp code/clinical_co-pilot"
 source venv/bin/activate
-python main.py
+python python/main.py
 ```
 
 ### Step 2: Start Frontend (already running)
@@ -175,7 +175,7 @@ http://localhost:3000/doctor/clinical-session
 curl http://localhost:8000/docs
 
 # Start it:
-python main.py
+python python/main.py
 ```
 
 ### ⏱️ No Transcription After 15 Seconds
@@ -201,7 +201,7 @@ python main.py
   ```bash
   # Ctrl+C on both terminals
   # Restart backend, then frontend
-  python main.py  # Backend terminal
+  python python/main.py  # Backend terminal
   npm run dev     # Frontend terminal
   ```
 
@@ -231,7 +231,8 @@ clinical_co-pilot/
 │   └── use-clinical-websocket.ts ✅ CONNECTED
 ├── components/
 │   └── soap-avs-dialog.tsx ✅ WORKING
-└── main.py ✅ BACKEND
+└── python/
+  └── main.py ✅ BACKEND
 ```
 
 ---
@@ -275,7 +276,7 @@ For detailed information, see:
 - WebSocket: ✅ Connected
 - Transcriptions: ✅ Real-time
 
-**Start by running `python main.py` in a terminal, then open http://localhost:3000!**
+**Start by running `python python/main.py` in a terminal, then open http://localhost:3000!**
 
 ---
 
