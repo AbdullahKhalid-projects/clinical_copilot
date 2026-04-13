@@ -215,6 +215,7 @@ model MedicalReport {
   documentId      String
   document        Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
   markdown        String?
+  extractedJson   Json?
   reportURL       String?  // URL to the generated PDF report
   // Report metadata
   reportDate      DateTime?
@@ -246,14 +247,23 @@ model MedicalReportValue {
   
   // Key-value data (all uppercase for standardization)
   key             String       // e.g., "VITAMIN D2"
+  keyNormalized   String?      // e.g., "vitamin d2"
   value           String       // e.g., "1.15"
+  valueNumeric    Float?
   unit            String?      // e.g., "NG/ML"
+  unitNormalized  String?
+  observedAt      DateTime?
+  sequence        Int?
   
   createdAt       DateTime @default(now())
   
   @@index([reportId])
   @@index([key])
   @@index([userId])
+  @@index([keyNormalized])
+  @@index([userId, keyNormalized])
+  @@index([userId, keyNormalized, observedAt])
+  @@index([reportId, keyNormalized])
 }
 
 // --------------------------------------

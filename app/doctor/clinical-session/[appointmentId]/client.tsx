@@ -64,6 +64,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+    DropdownMenuRadioGroup,
+    DropdownMenuRadioItem,
   DropdownMenuTrigger,
   DropdownMenuLabel,
   DropdownMenuSeparator
@@ -234,11 +236,11 @@ function hasNonEmptyNoteData(noteData: Record<string, unknown>): boolean {
         }
 
         if (typeof value === "number") {
-            return true;
+            return Number.isFinite(value) && value !== 0;
         }
 
         if (typeof value === "boolean") {
-            return value;
+            return value === true;
         }
 
         return false;
@@ -297,6 +299,9 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
   const [isUploading, setIsUploading] = React.useState(false);
   const [uploadProgress, setUploadProgress] = React.useState(0);
   const [isProcessing, setIsProcessing] = React.useState(false);
+        const [microphoneDevices, setMicrophoneDevices] = React.useState<MediaDeviceInfo[]>([]);
+        const [selectedMicrophoneId, setSelectedMicrophoneId] = React.useState<string>("default");
+        const [isLoadingMicrophones, setIsLoadingMicrophones] = React.useState(false);
     const [recordingUrl, setRecordingUrl] = React.useState<string | null>(currentAppointment.recordingUrl ?? null);
     const [isRecordingInfoOpen, setIsRecordingInfoOpen] = React.useState(false);
     const [activeMainTab, setActiveMainTab] = React.useState<ClinicalSessionTab>("context");
@@ -312,6 +317,11 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [editableNoteData, setEditableNoteData] = React.useState<Record<string, unknown>>(() => extractNoteDataFromPayload(appointment?.soapNote));
     const [isNoteDirty, setIsNoteDirty] = React.useState(false);
     const [generatedNoteText, setGeneratedNoteText] = React.useState<string>(() => extractNoteTextFromPayload(appointment?.soapNote));
+    const [hasGeneratedNoteCheckpoint, setHasGeneratedNoteCheckpoint] = React.useState<boolean>(() => {
+        const initialNoteText = extractNoteTextFromPayload(appointment?.soapNote);
+        const initialNoteData = extractNoteDataFromPayload(appointment?.soapNote);
+        return initialNoteText.trim().length > 0 || hasNonEmptyNoteData(initialNoteData);
+    });
     const uploadInputRef = React.useRef<HTMLInputElement | null>(null);
     const [isLinkPatientDialogOpen, setIsLinkPatientDialogOpen] = React.useState(false);
     const [isLoadingPatients, setIsLoadingPatients] = React.useState(false);
@@ -324,6 +334,9 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [isFinalizingSession, setIsFinalizingSession] = React.useState(false);
     const [finalizeChecklistResult, setFinalizeChecklistResult] = React.useState<FinalizeChecklistResult | null>(null);
     const hasAutoOpenedFinalizeRef = React.useRef(false);
+        const hasMountedPanelRef = React.useRef(false);
+        const panelRenderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+        const [isPanelRendering, setIsPanelRendering] = React.useState(false);
         const transcriptEndRef = React.useRef<HTMLDivElement | null>(null);
         const liveAudioContextRef = React.useRef<AudioContext | null>(null);
         const liveProcessorRef = React.useRef<ScriptProcessorNode | null>(null);
@@ -348,6 +361,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     }, [currentAppointment?.transcript]);
 
     const displayedTranscript = transcript.length > 0 ? transcript : persistedTranscript;
+    const isTranscriptReadyForNote = displayedTranscript.length > 0;
 
     const selectedTemplateOption = React.useMemo(
         () => noteTemplates.find((template) => template.id === selectedTemplateId) || null,
@@ -379,6 +393,82 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
   const { toast } = useToast();
   const { startUpload } = useUploadThing("audioUploader");
+
+    const refreshMicrophoneDevices = React.useCallback(async (requestLabels = false, showError = false) => {
+        if (!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices)) {
+            setMicrophoneDevices([]);
+            return;
+        }
+
+        setIsLoadingMicrophones(true);
+        try {
+            if (requestLabels && navigator.mediaDevices.getUserMedia) {
+                try {
+                    const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    permissionStream.getTracks().forEach((track) => track.stop());
+                } catch (error) {
+                    console.error("Microphone permission was not granted for device labels", error);
+                }
+            }
+
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const inputs = devices.filter((device) => device.kind === "audioinput");
+            setMicrophoneDevices(inputs);
+            setSelectedMicrophoneId((current) => {
+                if (current === "default") {
+                    return current;
+                }
+
+                return inputs.some((device) => device.deviceId === current) ? current : "default";
+            });
+        } catch (error) {
+            console.error("Unable to enumerate microphone devices", error);
+            if (showError) {
+                toast({
+                    title: "Microphone devices unavailable",
+                    description: "Could not read audio input devices from this browser.",
+                    variant: "destructive",
+                });
+            }
+        } finally {
+            setIsLoadingMicrophones(false);
+        }
+    }, [toast]);
+
+    React.useEffect(() => {
+        void refreshMicrophoneDevices(false, false);
+
+        if (!(navigator.mediaDevices && navigator.mediaDevices.addEventListener)) {
+            return;
+        }
+
+        const handleDeviceChange = () => {
+            void refreshMicrophoneDevices(false, false);
+        };
+
+        navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
+        return () => {
+            navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+        };
+    }, [refreshMicrophoneDevices]);
+
+    const selectableMicrophones = React.useMemo(
+        () => microphoneDevices.filter((device) => device.deviceId && device.deviceId !== "default"),
+        [microphoneDevices],
+    );
+
+    const selectedMicrophoneLabel = React.useMemo(() => {
+        if (selectedMicrophoneId === "default") {
+            return "System Default";
+        }
+
+        const matchedDevice = selectableMicrophones.find((device) => device.deviceId === selectedMicrophoneId);
+        if (!matchedDevice) {
+            return "Unknown microphone";
+        }
+
+        return matchedDevice.label?.trim() || "Unnamed microphone";
+    }, [selectableMicrophones, selectedMicrophoneId]);
 
     const cleanupLiveTranscription = React.useCallback(() => {
         if (liveProcessorRef.current) {
@@ -511,6 +601,32 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             disconnect();
         };
     }, [cleanupLiveTranscription, disconnect]);
+
+    React.useEffect(() => {
+        if (!hasMountedPanelRef.current) {
+            hasMountedPanelRef.current = true;
+            return;
+        }
+
+        setIsPanelRendering(true);
+
+        if (panelRenderTimeoutRef.current) {
+            clearTimeout(panelRenderTimeoutRef.current);
+        }
+
+        panelRenderTimeoutRef.current = setTimeout(() => {
+            setIsPanelRendering(false);
+            panelRenderTimeoutRef.current = null;
+        }, 280);
+    }, [activeMainTab]);
+
+    React.useEffect(() => {
+        return () => {
+            if (panelRenderTimeoutRef.current) {
+                clearTimeout(panelRenderTimeoutRef.current);
+            }
+        };
+    }, []);
 
     async function uploadAudioFile(audioFile: File) {
         setIsProcessing(true);
@@ -652,6 +768,15 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             return;
         }
 
+        if (!isTranscriptReadyForNote) {
+            toast({
+                title: "Transcript required",
+                description: "Complete transcription first, then click Generate to create the note.",
+                variant: "destructive",
+            });
+            return;
+        }
+
         setIsGeneratingNote(true);
         try {
             const result = await generateAppointmentNoteFromTemplate(currentAppointment.id, selectedTemplateId);
@@ -667,6 +792,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             setGeneratedNoteText(result.noteText);
             setEditableNoteData(result.noteData);
             setIsNoteDirty(false);
+            setHasGeneratedNoteCheckpoint(true);
 
             const latestSessionData = await getClinicalSessionData(currentAppointment.id);
             if (latestSessionData) {
@@ -687,7 +813,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         } finally {
             setIsGeneratingNote(false);
         }
-    }, [currentAppointment.id, selectedTemplateId, toast]);
+    }, [currentAppointment.id, isTranscriptReadyForNote, selectedTemplateId, toast]);
 
     const handleNoteFieldChange = React.useCallback((fieldKey: string, nextValue: unknown) => {
         setEditableNoteData((prev) => ({
@@ -749,6 +875,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         const payloadNoteData = extractNoteDataFromPayload(currentAppointment?.soapNote);
 
         setGeneratedNoteText(payloadNoteText);
+        setHasGeneratedNoteCheckpoint(payloadNoteText.trim().length > 0 || hasNonEmptyNoteData(payloadNoteData));
         if (Object.keys(payloadNoteData).length > 0) {
             setEditableNoteData(payloadNoteData);
             setIsNoteDirty(false);
@@ -930,12 +1057,12 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
     const handleFinalizeTaskAction = React.useCallback((taskKey: "patientLinked" | "transcriptReady" | "noteReady") => {
         if (taskKey === "patientLinked") {
+            if (hasLinkedPatient) {
+                return;
+            }
+
             setIsFinalizeDialogOpen(false);
-            const returnToParams = new URLSearchParams({
-                finalize: "1",
-                focusTask: taskKey,
-            });
-            const returnTo = `/doctor/clinical-session/${currentAppointment.id}?${returnToParams.toString()}`;
+            const returnTo = `/doctor/clinical-session/${currentAppointment.id}`;
             const params = new URLSearchParams({
                 mode: "link",
                 appointmentId: currentAppointment.id,
@@ -953,7 +1080,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
         setActiveMainTab("note");
         setIsFinalizeDialogOpen(false);
-    }, [currentAppointment.id, router]);
+    }, [currentAppointment.id, hasLinkedPatient, router]);
 
     const handleFinalizeSession = React.useCallback(async () => {
         setIsFinalizingSession(true);
@@ -997,16 +1124,13 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const localFinalizeChecklist = React.useMemo(
         () => ({
             patientLinked: hasLinkedPatient,
-            transcriptReady: displayedTranscript.length > 0,
-            noteReady: generatedNoteText.trim().length > 0 || hasNonEmptyNoteData(editableNoteData),
+            transcriptReady: isTranscriptReadyForNote,
+            noteReady: isTranscriptReadyForNote && hasGeneratedNoteCheckpoint,
         }),
-        [displayedTranscript.length, editableNoteData, generatedNoteText, hasLinkedPatient],
+        [hasGeneratedNoteCheckpoint, hasLinkedPatient, isTranscriptReadyForNote],
     );
+    const isSessionFinalized = currentAppointment.status === "COMPLETED";
     const finalizeChecklist = finalizeChecklistResult?.checklist ?? localFinalizeChecklist;
-    const finalizeProgress = finalizeChecklistResult?.progress ?? {
-        completed: [finalizeChecklist.patientLinked, finalizeChecklist.transcriptReady, finalizeChecklist.noteReady].filter(Boolean).length,
-        total: 3,
-    };
     const finalizeBlockersByKey = React.useMemo(
         () =>
             new Map(
@@ -1017,14 +1141,14 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             ),
         [finalizeChecklistResult?.blockers],
     );
-    const canFinalizeSession = finalizeChecklistResult?.canFinalize
-        ?? (finalizeChecklist.patientLinked && finalizeChecklist.transcriptReady && finalizeChecklist.noteReady);
+    const canFinalizeSession = isSessionFinalized
+        || (finalizeChecklistResult?.canFinalize
+            ?? (finalizeChecklist.patientLinked && finalizeChecklist.transcriptReady && finalizeChecklist.noteReady));
 
     const finalizeTasks: Array<{
         key: "patientLinked" | "transcriptReady" | "noteReady";
         label: string;
         description: string;
-        actionLabel: string;
         complete: boolean;
     }> = [
         {
@@ -1033,7 +1157,6 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             description: finalizeChecklist.patientLinked
                 ? "Patient is linked and ready for finalization."
                 : finalizeBlockersByKey.get("patientLinked")?.description || "Attach this session to the correct patient profile.",
-            actionLabel: finalizeBlockersByKey.get("patientLinked")?.actionLabel || "Link Patient",
             complete: finalizeChecklist.patientLinked,
         },
         {
@@ -1045,7 +1168,6 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                     || (finalizeChecklistResult?.aiStatus === "PROCESSING"
                         ? "Transcription is still processing. Check Transcript to monitor progress."
                         : "Record or upload audio, then confirm transcription."),
-            actionLabel: finalizeBlockersByKey.get("transcriptReady")?.actionLabel || "Go to Transcript",
             complete: finalizeChecklist.transcriptReady,
         },
         {
@@ -1053,12 +1175,23 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             label: "Visit note generated",
             description: finalizeChecklist.noteReady
                 ? "Visit note is generated and available."
-                : finalizeBlockersByKey.get("noteReady")?.description || "Generate and review a template-based note in the Note tab.",
-            actionLabel: finalizeBlockersByKey.get("noteReady")?.actionLabel || "Go to Note",
+                : finalizeBlockersByKey.get("noteReady")?.description
+                    || (!finalizeChecklist.transcriptReady
+                        ? "Complete transcript first, then click Generate in the Note tab."
+                        : "Click Generate in the Note tab, then review the generated note."),
             complete: finalizeChecklist.noteReady,
         },
     ];
-    const pendingFinalizeTasks = finalizeTasks.filter((task) => !task.complete);
+    const finalizeTrackingTasks = React.useMemo(
+        () => finalizeTasks.map((task) => ({
+            ...task,
+            complete: isSessionFinalized ? true : task.complete,
+        })),
+        [finalizeTasks, isSessionFinalized],
+    );
+    const isMainPanelBusy = isPanelRendering
+        || (activeMainTab === "transcript" && isLiveConnecting)
+        || (activeMainTab === "note" && (isLoadingNoteTemplates || isGeneratingNote || isSavingNote));
 
     const handleDeleteAppointment = async () => {
         setIsDeletingAppointment(true);
@@ -1156,6 +1289,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
                         <SessionRecordingActions
                             isUploading={isUploading}
+                            selectedMicrophoneId={selectedMicrophoneId}
                             onStart={handleRecordingStart}
                             onPauseChange={handleRecordingPauseChange}
                             onDiscard={handleRecordingDiscard}
@@ -1223,21 +1357,70 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
                             <div className="flex items-center gap-1">
                                 {activeMainTab === "transcript" && (
-                                    <div className="flex items-center border rounded-md bg-background">
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 border-r rounded-none">
-                                            <Mic className="w-4 h-4" />
-                                        </Button>
-                                        <Badge variant="outline" className="mx-1 gap-1.5 border-border bg-background/80 text-xs font-semibold">
-                                            <span
-                                                className={`h-2 w-2 rounded-full ${isLiveConnecting ? "bg-amber-500" : connected ? (isRecorderPaused ? "bg-amber-500" : "bg-emerald-500") : "bg-black shadow-[0_0_8px_1px_rgba(0,0,0,0.45)]"}`}
-                                                aria-hidden="true"
-                                            />
-                                            {isLiveConnecting ? "Connecting" : connected ? (isRecorderPaused ? "Paused" : `Live · ${sessionId?.slice(-6) || "ready"}`) : "Offline"}
-                                        </Badge>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-none px-1">
-                                            <ChevronDown className="w-3 h-3" />
-                                        </Button>
-                                    </div>
+                                    <DropdownMenu
+                                        onOpenChange={(open) => {
+                                            if (open) {
+                                                void refreshMicrophoneDevices(true, false);
+                                            }
+                                        }}
+                                    >
+                                        <div className="flex items-center border rounded-md bg-background">
+                                            <Button variant="ghost" size="icon" className="h-8 w-8 border-r rounded-none">
+                                                <Mic className="w-4 h-4" />
+                                            </Button>
+                                            <Badge variant="outline" className="mx-1 gap-1.5 border-border bg-background/80 text-xs font-semibold">
+                                                <span
+                                                    className={`h-2 w-2 rounded-full ${isLiveConnecting ? "bg-amber-500" : connected ? (isRecorderPaused ? "bg-amber-500" : "bg-emerald-500") : "bg-black shadow-[0_0_8px_1px_rgba(0,0,0,0.45)]"}`}
+                                                    aria-hidden="true"
+                                                />
+                                                {isLiveConnecting ? "Connecting" : connected ? (isRecorderPaused ? "Paused" : `Live · ${sessionId?.slice(-6) || "ready"}`) : "Offline"}
+                                            </Badge>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 rounded-none px-1"
+                                                    aria-label="Microphone settings"
+                                                    title="Microphone settings"
+                                                >
+                                                    <ChevronDown className="w-3 h-3" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                        </div>
+
+                                        <DropdownMenuContent align="end" className="w-72">
+                                            <DropdownMenuLabel>Microphone Input</DropdownMenuLabel>
+                                            <DropdownMenuRadioGroup value={selectedMicrophoneId} onValueChange={setSelectedMicrophoneId}>
+                                                <DropdownMenuRadioItem value="default">System Default</DropdownMenuRadioItem>
+                                                {selectableMicrophones.map((device, index) => (
+                                                    <DropdownMenuRadioItem key={device.deviceId} value={device.deviceId}>
+                                                        {device.label?.trim() || `Microphone ${index + 1}`}
+                                                    </DropdownMenuRadioItem>
+                                                ))}
+                                            </DropdownMenuRadioGroup>
+
+                                            {selectableMicrophones.length === 0 && (
+                                                <DropdownMenuItem disabled>No specific microphones detected</DropdownMenuItem>
+                                            )}
+
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem
+                                                onClick={() => {
+                                                    void refreshMicrophoneDevices(true, true);
+                                                }}
+                                                disabled={isLoadingMicrophones}
+                                            >
+                                                {isLoadingMicrophones ? "Refreshing devices..." : "Refresh device list"}
+                                            </DropdownMenuItem>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem disabled title={selectedMicrophoneLabel}>
+                                                Selected: {selectedMicrophoneLabel}
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem disabled>
+                                                Changes apply on next recording start
+                                            </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
                                 )}
 
                                 {activeMainTab === "note" && (
@@ -1259,8 +1442,9 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                             type="button"
                                             size="sm"
                                             className="h-8"
-                                            disabled={isGeneratingNote || !selectedTemplateId}
+                                            disabled={isGeneratingNote || !selectedTemplateId || !isTranscriptReadyForNote}
                                             onClick={handleGenerateTemplateNote}
+                                            title={isTranscriptReadyForNote ? "Generate note" : "Transcript required before generating note"}
                                         >
                                             {isGeneratingNote ? (
                                                 <>
@@ -1340,7 +1524,13 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                             </div>
                         </div>
 
-                        <div className={`flex-1 min-h-0 p-4 ${activeMainTab === "note" ? "bg-white" : "bg-white/50 dark:bg-black/20"}`}>
+                        <div className={`relative flex-1 min-h-0 p-4 ${activeMainTab === "note" ? "bg-white" : "bg-white/50 dark:bg-black/20"}`}>
+                            {isMainPanelBusy && (
+                                <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-white">
+                                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                                </div>
+                            )}
+
                             {activeMainTab === "transcript" ? (
                                 <LiveTranscriptPanel
                                     transcript={displayedTranscript}
@@ -1437,32 +1627,41 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                 </div>
             </main>
 
-            {currentAppointment.status !== "COMPLETED" && (
-                <div className="border-t border-stone-200 bg-stone-50/95 backdrop-blur px-4 sm:px-5 py-2.5">
-                    <div className="mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant="outline" className="gap-1.5 border-stone-300 bg-white text-stone-800">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />
-                                {finalizeProgress.completed}/{finalizeProgress.total} complete
-                            </Badge>
-                            {pendingFinalizeTasks.length > 0 ? (
-                                pendingFinalizeTasks.map((task) => (
-                                    <Button
-                                        key={task.key}
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 rounded-full border border-stone-300 bg-white px-2.5 text-[11px] font-medium uppercase tracking-wide text-stone-700 hover:bg-stone-100 hover:text-stone-900"
-                                        onClick={() => handleFinalizeTaskAction(task.key)}
-                                    >
-                                        {task.actionLabel}
-                                    </Button>
-                                ))
-                            ) : (
-                                <span className="text-xs font-medium text-emerald-700">All tasks complete. Ready to finalize.</span>
-                            )}
-                        </div>
+            <div className="border-t border-stone-200 bg-stone-50/95 backdrop-blur px-4 sm:px-5 py-2.5">
+                <div className={`mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center ${isSessionFinalized ? "sm:justify-start" : "sm:justify-between"}`}>
+                    <div className="flex min-w-0 items-center">
+                        <div className="min-w-0 flex-1 overflow-x-auto">
+                            <div className="inline-flex min-w-max items-center">
+                                {finalizeTrackingTasks.map((task, index) => (
+                                    <React.Fragment key={task.key}>
+                                        {index > 0 && (
+                                            <div className={`mx-1 h-px w-6 ${task.complete ? "bg-emerald-300" : "bg-red-300"}`} />
+                                        )}
 
+                                        <button
+                                            type="button"
+                                            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${task.complete
+                                                ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                                                : "border-red-200 bg-red-50 text-red-800 hover:bg-red-100"}`}
+                                            disabled={isSessionFinalized || task.complete}
+                                            onClick={() => {
+                                                if (!isSessionFinalized && !task.complete) {
+                                                    handleFinalizeTaskAction(task.key);
+                                                }
+                                            }}
+                                            title={task.description}
+                                            aria-label={`${task.label}: ${task.complete ? "complete" : "incomplete"}`}
+                                        >
+                                            <span className={`h-2.5 w-2.5 rounded-full ${task.complete ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
+                                            {task.label}
+                                        </button>
+                                    </React.Fragment>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    {!isSessionFinalized && (
                         <div className="flex items-center gap-2">
                             <Button
                                 type="button"
@@ -1481,18 +1680,16 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                             <Button
                                 type="button"
                                 size="sm"
-                                variant={canFinalizeSession ? "default" : "outline"}
-                                className={canFinalizeSession
-                                    ? "h-8 border border-black bg-black text-white hover:bg-stone-800 hover:text-white"
-                                    : "h-8 border border-stone-300 bg-white text-stone-800 hover:bg-stone-100"}
+                                variant="default"
+                                className="h-8 border border-black bg-black text-white hover:bg-stone-800 hover:text-white"
                                 onClick={openFinalizeDialog}
                             >
-                                {canFinalizeSession ? "Finalize Session" : "Review Remaining"}
+                                Finalize Session
                             </Button>
                         </div>
-                    </div>
+                    )}
                 </div>
-            )}
+            </div>
 
             <Dialog open={isProcessing} onOpenChange={() => {}}>
                 <DialogContent className="sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
@@ -1554,22 +1751,26 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
                     <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs">
                         <span className="text-stone-600">
-                            Progress: <span className="font-semibold text-stone-900">{finalizeProgress.completed}/{finalizeProgress.total}</span> tasks complete
+                            {isSessionFinalized
+                                ? "This session has been finalized."
+                                : "Complete each checkpoint to finalize this session."}
                         </span>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 rounded-full border border-stone-300 bg-white p-0 text-stone-700 hover:bg-stone-100 hover:text-stone-900"
-                            onClick={() => {
-                                void loadFinalizeChecklist();
-                            }}
-                            disabled={isFinalizeChecklistLoading || isFinalizingSession}
-                            title="Refresh checklist"
-                            aria-label="Refresh checklist"
-                        >
-                            {isFinalizeChecklistLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-                        </Button>
+                        {!isSessionFinalized && (
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 rounded-full border border-stone-300 bg-white p-0 text-stone-700 hover:bg-stone-100 hover:text-stone-900"
+                                onClick={() => {
+                                    void loadFinalizeChecklist();
+                                }}
+                                disabled={isFinalizeChecklistLoading || isFinalizingSession}
+                                title="Refresh checklist"
+                                aria-label="Refresh checklist"
+                            >
+                                {isFinalizeChecklistLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                            </Button>
+                        )}
                     </div>
 
                     {isFinalizeChecklistLoading ? (
@@ -1579,6 +1780,36 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                         </div>
                     ) : (
                         <div className="space-y-3">
+                            <div className="overflow-x-auto rounded-lg border bg-muted/20 p-3">
+                                <div className="inline-flex min-w-max items-center">
+                                    {finalizeTrackingTasks.map((task, index) => (
+                                        <React.Fragment key={task.key}>
+                                            {index > 0 && (
+                                                <div className={`mx-1 h-px w-6 ${task.complete ? "bg-emerald-300" : "bg-red-300"}`} />
+                                            )}
+
+                                            <button
+                                                type="button"
+                                                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${task.complete
+                                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                                                    : "border-red-200 bg-red-50 text-red-800 hover:bg-red-100"}`}
+                                                disabled={isSessionFinalized || task.complete}
+                                                onClick={() => {
+                                                    if (!isSessionFinalized && !task.complete) {
+                                                        handleFinalizeTaskAction(task.key);
+                                                    }
+                                                }}
+                                                title={task.description}
+                                                aria-label={`${task.label}: ${task.complete ? "complete" : "incomplete"}`}
+                                            >
+                                                <span className={`h-2.5 w-2.5 rounded-full ${task.complete ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
+                                                {task.label}
+                                            </button>
+                                        </React.Fragment>
+                                    ))}
+                                </div>
+                            </div>
+
                             {finalizeTasks.map((task) => (
                                 <div key={task.key} className="rounded-lg border p-3">
                                     <div className="flex items-start justify-between gap-3">
@@ -1586,22 +1817,15 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                             <p className="text-sm font-semibold text-foreground">{task.label}</p>
                                             <p className="mt-1 text-xs text-muted-foreground">{task.description}</p>
                                         </div>
-                                        {task.complete ? (
-                                            <Badge className="shrink-0 border-emerald-300 bg-emerald-100 text-emerald-900" variant="outline">
-                                                <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                                                Done
-                                            </Badge>
-                                        ) : (
-                                            <Button
-                                                type="button"
-                                                size="sm"
-                                                variant="ghost"
-                                                className="h-6 shrink-0 rounded-full border border-stone-300 bg-stone-100 px-2.5 text-[11px] font-medium uppercase tracking-wide text-stone-700 hover:bg-stone-200 hover:text-stone-900"
-                                                onClick={() => handleFinalizeTaskAction(task.key)}
-                                            >
-                                                {task.actionLabel}
-                                            </Button>
-                                        )}
+                                        <Badge
+                                            className={task.complete
+                                                ? "shrink-0 border-emerald-300 bg-emerald-100 text-emerald-900"
+                                                : "shrink-0 border-red-300 bg-red-100 text-red-900"}
+                                            variant="outline"
+                                        >
+                                            <span className={`mr-1 inline-block h-2.5 w-2.5 rounded-full ${task.complete ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
+                                            {task.complete ? "Complete" : "Pending"}
+                                        </Badge>
                                     </div>
                                 </div>
                             ))}
@@ -1624,23 +1848,25 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                         <Button type="button" variant="ghost" onClick={() => setIsFinalizeDialogOpen(false)}>
                             Close
                         </Button>
-                        <Button
-                            type="button"
-                            className="border border-black bg-black text-white hover:bg-stone-800 hover:text-white"
-                            onClick={() => {
-                                void handleFinalizeSession();
-                            }}
-                            disabled={isFinalizeChecklistLoading || !canFinalizeSession || isFinalizingSession}
-                        >
-                            {isFinalizingSession ? (
-                                <>
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    Finalizing
-                                </>
-                            ) : (
-                                "Finalize Session"
-                            )}
-                        </Button>
+                        {!isSessionFinalized && (
+                            <Button
+                                type="button"
+                                className="border border-black bg-black text-white hover:bg-stone-800 hover:text-white"
+                                onClick={() => {
+                                    void handleFinalizeSession();
+                                }}
+                                disabled={isFinalizeChecklistLoading || !canFinalizeSession || isFinalizingSession}
+                            >
+                                {isFinalizingSession ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        Finalizing
+                                    </>
+                                ) : (
+                                    "Finalize Session"
+                                )}
+                            </Button>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

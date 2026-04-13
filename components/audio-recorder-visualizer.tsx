@@ -20,6 +20,7 @@ type Props = {
   onDiscard?: () => void;
   onStop: (blob: Blob) => void;
   isUploading: boolean;
+  selectedMicrophoneId?: string;
 };
 
 // Utility function to pad a number with leading zeros
@@ -34,7 +35,8 @@ export const AudioRecorderWithVisualizer = ({
   onPauseChange,
   onDiscard,
   onStop,
-  isUploading
+  isUploading,
+  selectedMicrophoneId,
 }: Props) => {
   const { theme } = useTheme();
   // States
@@ -74,63 +76,90 @@ export const AudioRecorderWithVisualizer = ({
   const chunksRef = useRef<BlobPart[]>([]);
   const timerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  function startRecording() {
+  async function startRecording() {
     if (isRecording) return;
 
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      navigator.mediaDevices
-        .getUserMedia({
-          audio: true,
-        })
-        .then((stream) => {
-          setIsRecording(true);
-          setIsPaused(false);
-          onPauseChange?.(false);
-          // ============ Analyzing ============
-          const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-          const audioCtx = new AudioContext();
-          const analyser = audioCtx.createAnalyser();
-          const source = audioCtx.createMediaStreamSource(stream);
-          source.connect(analyser);
-          
-          const mimeType = MediaRecorder.isTypeSupported("audio/webm")
-            ? "audio/webm"
-            : MediaRecorder.isTypeSupported("audio/mp4")
-            ? "audio/mp4" 
-            : "audio/wav";
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+      return;
+    }
 
-          const mediaRecorder = new MediaRecorder(stream, { mimeType });
-          
-          mediaRecorderRef.current = {
-            stream,
-            analyser,
-            mediaRecorder,
-            audioContext: audioCtx,
-          };
+    const baseConstraints: MediaTrackConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    };
 
-          onStart?.(stream);
+    const preferredConstraints: MediaTrackConstraints = {
+      ...baseConstraints,
+      ...(selectedMicrophoneId && selectedMicrophoneId !== "default"
+        ? { deviceId: { exact: selectedMicrophoneId } }
+        : {}),
+    };
 
-          chunksRef.current = [];
-          
-          mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
-              chunksRef.current.push(e.data);
-            }
-          };
+    try {
+      let stream: MediaStream;
 
-          mediaRecorder.onstop = () => {
-             // If we stopped intentionally to save
-             // Note: in resetRecording we nullify onstop to avoid this call
-            const recordBlob = new Blob(chunksRef.current, { type: mimeType });
-            onStop(recordBlob);
-            chunksRef.current = [];
-          };
-
-          mediaRecorder.start(1000);
-        })
-        .catch((error) => {
-          console.error("Error accessing microphone:", error);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: preferredConstraints,
         });
+      } catch (error) {
+        if (!selectedMicrophoneId || selectedMicrophoneId === "default") {
+          throw error;
+        }
+
+        console.warn("Preferred microphone unavailable, falling back to system default", error);
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: baseConstraints,
+        });
+      }
+
+      setIsRecording(true);
+      setIsPaused(false);
+      onPauseChange?.(false);
+      // ============ Analyzing ============
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioContext();
+      const analyser = audioCtx.createAnalyser();
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4")
+        ? "audio/mp4"
+        : "audio/wav";
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+      mediaRecorderRef.current = {
+        stream,
+        analyser,
+        mediaRecorder,
+        audioContext: audioCtx,
+      };
+
+      onStart?.(stream);
+
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+         // If we stopped intentionally to save
+         // Note: in resetRecording we nullify onstop to avoid this call
+        const recordBlob = new Blob(chunksRef.current, { type: mimeType });
+        onStop(recordBlob);
+        chunksRef.current = [];
+      };
+
+      mediaRecorder.start(1000);
+    } catch (error) {
+      console.error("Error accessing microphone:", error);
     }
   }
 

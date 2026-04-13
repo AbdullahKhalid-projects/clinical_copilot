@@ -7,6 +7,7 @@ import { AudioRecorderWithVisualizer } from "@/components/audio-recorder-visuali
 
 interface SessionRecordingActionsProps {
   isUploading: boolean;
+  selectedMicrophoneId?: string;
   onStart: (stream: MediaStream) => void;
   onPauseChange: (paused: boolean) => void;
   onDiscard: () => void;
@@ -17,6 +18,7 @@ interface SessionRecordingActionsProps {
 
 export function SessionRecordingActions({
   isUploading,
+  selectedMicrophoneId,
   onStart,
   onPauseChange,
   onDiscard,
@@ -51,6 +53,7 @@ export function SessionRecordingActions({
         onDiscard={onDiscard}
         onStop={onStop}
         isUploading={isUploading}
+        selectedMicrophoneId={selectedMicrophoneId}
       />
     </div>
   );
