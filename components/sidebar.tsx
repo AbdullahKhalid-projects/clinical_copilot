@@ -112,6 +112,9 @@ interface SidebarProps {
   role: "doctor" | "patient";
 }
 
+const CLINICAL_CHAT_PANE_EVENT = "clinical:chat-pane-request";
+const CLINICAL_SUB_SIDEBAR_EVENT = "clinical:sub-sidebar-request";
+
 export function Sidebar({ role }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -154,6 +157,20 @@ export function Sidebar({ role }: SidebarProps) {
       setIsClinicalSidebarOpen(false);
     }
   }, [pathname]);
+
+  React.useEffect(() => {
+    const onChatPaneRequest = (event: Event) => {
+      const customEvent = event as CustomEvent<{ open?: boolean }>;
+      if (customEvent.detail?.open) {
+        setIsClinicalSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener(CLINICAL_CHAT_PANE_EVENT, onChatPaneRequest as EventListener);
+    return () => {
+      window.removeEventListener(CLINICAL_CHAT_PANE_EVENT, onChatPaneRequest as EventListener);
+    };
+  }, []);
 
   // Define groups based on role
   const navGroups = role === "doctor"
@@ -254,7 +271,15 @@ export function Sidebar({ role }: SidebarProps) {
                           onClick={(e) => {
                             if (isClinicalSession) {
                               e.preventDefault();
-                              setIsClinicalSidebarOpen(!isClinicalSidebarOpen);
+                              const nextOpen = !isClinicalSidebarOpen;
+                              setIsClinicalSidebarOpen(nextOpen);
+                              if (typeof window !== "undefined") {
+                                window.dispatchEvent(
+                                  new CustomEvent(CLINICAL_SUB_SIDEBAR_EVENT, {
+                                    detail: { open: nextOpen },
+                                  }),
+                                );
+                              }
                             } else {
                               setIsClinicalSidebarOpen(false);
                             }

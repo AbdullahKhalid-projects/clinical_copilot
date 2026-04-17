@@ -7,6 +7,8 @@ import { PDFDownloadLink } from "@react-pdf/renderer";
 import { 
     AudioLines,
   ChevronDown, 
+    ChevronLeft,
+    ChevronRight,
   Mic, 
   PenLine, 
         FileCode2,
@@ -42,6 +44,8 @@ import { useClinicalWebSocket, type TranscriptSegment } from "@/hooks/use-clinic
 import { SessionTabs, type ClinicalSessionTab } from "./components/session-tabs";
 import { LiveTranscriptPanel } from "./components/live-transcript-panel";
 import { SessionRecordingActions } from "./components/session-recording-actions";
+import { Thread } from "@/components/thread";
+import { AssistantRuntimeProvider, useLocalRuntime } from "@assistant-ui/react";
 import { confirmAndSaveAppointmentTranscription } from "../transcription-workflow-actions";
 import {
     generateAppointmentNoteFromTemplate,
@@ -111,6 +115,11 @@ import {
 interface ClinicalSessionClientProps {
   appointment: any; // We'll type this properly later or infer from usage
 }
+
+const CLINICAL_CHAT_PANE_EVENT = "clinical:chat-pane-request";
+const CLINICAL_SUB_SIDEBAR_EVENT = "clinical:sub-sidebar-request";
+const CHAT_PANEL_TRANSITION_MS = 300;
+const CHAT_PANEL_CONTENT_FADE_DELAY_MS = 80;
 
 function extractNoteTextFromPayload(rawSoapNote: any): string {
     if (!rawSoapNote || typeof rawSoapNote !== "object") {
@@ -248,6 +257,9 @@ function hasNonEmptyNoteData(noteData: Record<string, unknown>): boolean {
 }
 
 export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProps) {
+    const rootContainerRef = React.useRef<HTMLDivElement | null>(null);
+    const tabsRowRef = React.useRef<HTMLDivElement | null>(null);
+    const [pullTabTop, setPullTabTop] = React.useState<number | null>(null);
     const [currentAppointment, setCurrentAppointment] = React.useState(appointment);
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -305,6 +317,8 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [recordingUrl, setRecordingUrl] = React.useState<string | null>(currentAppointment.recordingUrl ?? null);
     const [isRecordingInfoOpen, setIsRecordingInfoOpen] = React.useState(false);
     const [activeMainTab, setActiveMainTab] = React.useState<ClinicalSessionTab>("context");
+    const [isChatPanelOpen, setIsChatPanelOpen] = React.useState(false);
+    const [isChatPanelContentVisible, setIsChatPanelContentVisible] = React.useState(false);
         const [isLiveConnecting, setIsLiveConnecting] = React.useState(false);
         const [isRecorderPaused, setIsRecorderPaused] = React.useState(false);
         const liveTranscriptionCancelledRef = React.useRef(false);
@@ -1227,8 +1241,105 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         }
     };
 
+    const handleToggleChatPane = React.useCallback(() => {
+        setIsChatPanelOpen((prev) => !prev);
+    }, []);
+
+    React.useEffect(() => {
+        if (!isChatPanelOpen) {
+            return;
+        }
+
+        window.dispatchEvent(
+            new CustomEvent(CLINICAL_CHAT_PANE_EVENT, {
+                detail: { open: true },
+            }),
+        );
+    }, [isChatPanelOpen]);
+
+    React.useEffect(() => {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+        if (isChatPanelOpen) {
+            setIsChatPanelContentVisible(false);
+            timeoutId = setTimeout(() => {
+                setIsChatPanelContentVisible(true);
+            }, CHAT_PANEL_TRANSITION_MS + CHAT_PANEL_CONTENT_FADE_DELAY_MS);
+        } else {
+            setIsChatPanelContentVisible(false);
+        }
+
+        return () => {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        };
+    }, [isChatPanelOpen]);
+
+    const updatePullTabPosition = React.useCallback(() => {
+        const rootRect = rootContainerRef.current?.getBoundingClientRect();
+        const tabsRect = tabsRowRef.current?.getBoundingClientRect();
+        if (!rootRect || !tabsRect) {
+            return;
+        }
+
+        setPullTabTop(tabsRect.top - rootRect.top + (tabsRect.height / 2));
+    }, []);
+
+    React.useEffect(() => {
+        updatePullTabPosition();
+
+        window.addEventListener("resize", updatePullTabPosition);
+        return () => {
+            window.removeEventListener("resize", updatePullTabPosition);
+        };
+    }, [updatePullTabPosition]);
+
+    React.useEffect(() => {
+        const onSubSidebarRequest = (event: Event) => {
+            const customEvent = event as CustomEvent<{ open?: boolean }>;
+            if (customEvent.detail?.open) {
+                setIsChatPanelOpen(false);
+            }
+        };
+
+        window.addEventListener(CLINICAL_SUB_SIDEBAR_EVENT, onSubSidebarRequest as EventListener);
+        return () => {
+            window.removeEventListener(CLINICAL_SUB_SIDEBAR_EVENT, onSubSidebarRequest as EventListener);
+        };
+    }, []);
+
+    const localChatModelAdapter = React.useMemo(
+        () => ({
+            run: async ({ messages }: { messages: ReadonlyArray<{ role: string; content: ReadonlyArray<{ type: string; text?: string }> }> }) => {
+                const lastUserText = [...messages]
+                    .reverse()
+                    .find((message) => message.role === "user")
+                    ?.content.filter((part) => part.type === "text")
+                    .map((part) => part.text ?? "")
+                    .join(" ")
+                    .trim();
+
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: lastUserText
+                                ? `I captured your question: "${lastUserText}". Retrieval-backed generation will be connected next.`
+                                : "Ask a follow-up question and I can help draft the next clinical step.",
+                        },
+                    ],
+                };
+            },
+        }),
+        [],
+    );
+
+    const chatRuntime = useLocalRuntime(localChatModelAdapter);
+
     return (
-        <div className="flex flex-col h-[calc(100svh-3rem)] overflow-hidden bg-background space-y-0">
+        <div ref={rootContainerRef} className="relative flex h-[calc(100svh-3rem)] overflow-hidden bg-background">
+            <div className="min-w-0 flex flex-1 flex-col">
             <header className="px-4 sm:px-5 py-3 border-b-2 border-border bg-background/95 backdrop-blur z-10">
                 <div className="flex flex-col gap-2.5">
                     <div className="flex items-start justify-between gap-3">
@@ -1333,295 +1444,297 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             </header>
 
             <main className="flex-1 overflow-hidden p-4 pt-6">
-                <div className="max-w-5xl mx-auto flex flex-col h-full gap-2.5 min-h-0">
-                    <div className="flex items-center justify-between">
-                        <SessionTabs activeTab={activeMainTab} onTabChange={setActiveMainTab} />
-                    </div>
+                <div className="mx-auto flex h-full w-full max-w-[1280px] min-h-0">
+                    <div className="min-w-0 flex flex-1 flex-col gap-2.5">
+                        <div ref={tabsRowRef} className="flex items-center justify-between">
+                            <SessionTabs activeTab={activeMainTab} onTabChange={setActiveMainTab} />
+                        </div>
 
-                    <div className="flex flex-col flex-1 min-h-0 bg-card rounded-xl border shadow-sm overflow-hidden">
-                        <div className="flex items-center justify-between p-2 border-b bg-muted/30">
-                            <div className="flex items-center gap-2">
-                                {activeMainTab === "transcript" && (
-                                    <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
-                                        <AudioLines className="h-4 w-4 text-muted-foreground" />
-                                        <span>Live Transcription</span>
-                                    </div>
-                                )}
-                                {activeMainTab === "note" && (
-                                    <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
-                                        <PenLine className="h-4 w-4 text-muted-foreground" />
-                                        <span>Template Note</span>
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="flex items-center gap-1">
-                                {activeMainTab === "transcript" && (
-                                    <DropdownMenu
-                                        onOpenChange={(open) => {
-                                            if (open) {
-                                                void refreshMicrophoneDevices(true, false);
-                                            }
-                                        }}
-                                    >
-                                        <div className="flex items-center border rounded-md bg-background">
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 border-r rounded-none">
-                                                <Mic className="w-4 h-4" />
-                                            </Button>
-                                            <Badge variant="outline" className="mx-1 gap-1.5 border-border bg-background/80 text-xs font-semibold">
-                                                <span
-                                                    className={`h-2 w-2 rounded-full ${isLiveConnecting ? "bg-amber-500" : connected ? (isRecorderPaused ? "bg-amber-500" : "bg-emerald-500") : "bg-black shadow-[0_0_8px_1px_rgba(0,0,0,0.45)]"}`}
-                                                    aria-hidden="true"
-                                                />
-                                                {isLiveConnecting ? "Connecting" : connected ? (isRecorderPaused ? "Paused" : `Live · ${sessionId?.slice(-6) || "ready"}`) : "Offline"}
-                                            </Badge>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="h-8 w-8 rounded-none px-1"
-                                                    aria-label="Microphone settings"
-                                                    title="Microphone settings"
-                                                >
-                                                    <ChevronDown className="w-3 h-3" />
-                                                </Button>
-                                            </DropdownMenuTrigger>
+                        <div className="flex flex-col flex-1 min-h-0 bg-card rounded-xl border shadow-sm overflow-hidden">
+                            <div className="flex items-center justify-between p-2 border-b bg-muted/30">
+                                <div className="flex items-center gap-2">
+                                    {activeMainTab === "transcript" && (
+                                        <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
+                                            <AudioLines className="h-4 w-4 text-muted-foreground" />
+                                            <span>Live Transcription</span>
                                         </div>
+                                    )}
+                                    {activeMainTab === "note" && (
+                                        <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
+                                            <PenLine className="h-4 w-4 text-muted-foreground" />
+                                            <span>Template Note</span>
+                                        </div>
+                                    )}
+                                </div>
 
-                                        <DropdownMenuContent align="end" className="w-72">
-                                            <DropdownMenuLabel>Microphone Input</DropdownMenuLabel>
-                                            <DropdownMenuRadioGroup value={selectedMicrophoneId} onValueChange={setSelectedMicrophoneId}>
-                                                <DropdownMenuRadioItem value="default">System Default</DropdownMenuRadioItem>
-                                                {selectableMicrophones.map((device, index) => (
-                                                    <DropdownMenuRadioItem key={device.deviceId} value={device.deviceId}>
-                                                        {device.label?.trim() || `Microphone ${index + 1}`}
-                                                    </DropdownMenuRadioItem>
-                                                ))}
-                                            </DropdownMenuRadioGroup>
-
-                                            {selectableMicrophones.length === 0 && (
-                                                <DropdownMenuItem disabled>No specific microphones detected</DropdownMenuItem>
-                                            )}
-
-                                            <DropdownMenuSeparator />
-                                            <DropdownMenuItem
-                                                onClick={() => {
-                                                    void refreshMicrophoneDevices(true, true);
-                                                }}
-                                                disabled={isLoadingMicrophones}
-                                            >
-                                                {isLoadingMicrophones ? "Refreshing devices..." : "Refresh device list"}
-                                            </DropdownMenuItem>
-                                            <DropdownMenuSeparator />
-                                            <DropdownMenuItem disabled title={selectedMicrophoneLabel}>
-                                                Selected: {selectedMicrophoneLabel}
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem disabled>
-                                                Changes apply on next recording start
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                )}
-
-                                {activeMainTab === "note" && (
-                                    <div className="flex items-center gap-2">
-                                        <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
-                                            <SelectTrigger className="h-8 min-w-[240px] bg-background">
-                                                <SelectValue placeholder={isLoadingNoteTemplates ? "Loading templates..." : "Select template"} />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {noteTemplates.map((template) => (
-                                                    <SelectItem key={template.id} value={template.id}>
-                                                        {template.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            className="h-8"
-                                            disabled={isGeneratingNote || !selectedTemplateId || !isTranscriptReadyForNote}
-                                            onClick={handleGenerateTemplateNote}
-                                            title={isTranscriptReadyForNote ? "Generate note" : "Transcript required before generating note"}
-                                        >
-                                            {isGeneratingNote ? (
-                                                <>
-                                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                                    Generating
-                                                </>
-                                            ) : (
-                                                "Generate"
-                                            )}
-                                        </Button>
-
-                                        <Button
-                                            type="button"
-                                            size="icon"
-                                            variant="ghost"
-                                            className={`h-8 w-8 rounded-sm ${activeNotePanel === "editor" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                                            onClick={() => setActiveNotePanel("editor")}
-                                            title="Editor"
-                                        >
-                                            <FileCode2 className="h-4 w-4" />
-                                        </Button>
-
-                                        <Button
-                                            type="button"
-                                            size="icon"
-                                            variant="ghost"
-                                            className={`h-8 w-8 rounded-sm ${activeNotePanel === "preview" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                                            onClick={() => setActiveNotePanel("preview")}
-                                            title="Preview"
-                                        >
-                                            <FileText className="h-4 w-4" />
-                                        </Button>
-
-                                        <Button
-                                            type="button"
-                                            size="icon"
-                                            variant="ghost"
-                                            className="h-8 w-8 rounded-sm text-zinc-700 hover:text-zinc-900"
-                                            title={isSavingNote ? "Saving..." : "Save note"}
-                                            disabled={isSavingNote || !isNoteDirty || !selectedTemplateId}
-                                            onClick={() => {
-                                                void handleSaveTemplateNote();
+                                <div className="flex items-center gap-1">
+                                    {activeMainTab === "transcript" && (
+                                        <DropdownMenu
+                                            onOpenChange={(open) => {
+                                                if (open) {
+                                                    void refreshMicrophoneDevices(true, false);
+                                                }
                                             }}
                                         >
-                                            {isSavingNote ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                                        </Button>
+                                            <div className="flex items-center border rounded-md bg-background">
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 border-r rounded-none">
+                                                    <Mic className="w-4 h-4" />
+                                                </Button>
+                                                <Badge variant="outline" className="mx-1 gap-1.5 border-border bg-background/80 text-xs font-semibold">
+                                                    <span
+                                                        className={`h-2 w-2 rounded-full ${isLiveConnecting ? "bg-amber-500" : connected ? (isRecorderPaused ? "bg-amber-500" : "bg-emerald-500") : "bg-black shadow-[0_0_8px_1px_rgba(0,0,0,0.45)]"}`}
+                                                        aria-hidden="true"
+                                                    />
+                                                    {isLiveConnecting ? "Connecting" : connected ? (isRecorderPaused ? "Paused" : `Live · ${sessionId?.slice(-6) || "ready"}`) : "Offline"}
+                                                </Badge>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 rounded-none px-1"
+                                                        aria-label="Microphone settings"
+                                                        title="Microphone settings"
+                                                    >
+                                                        <ChevronDown className="w-3 h-3" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                            </div>
 
-                                        {selectedTemplate ? (
-                                            <PDFDownloadLink
-                                                document={<NoteDocument template={selectedTemplate} llmObject={noteDocumentData} />}
-                                                fileName={`${selectedTemplate.name.toLowerCase().replace(/\s+/g, "-")}.pdf`}
-                                                className="inline-flex h-8 w-8 items-center justify-center rounded-sm p-0 text-zinc-700 hover:bg-transparent hover:text-zinc-900"
-                                                title="Download PDF"
+                                            <DropdownMenuContent align="end" className="w-72">
+                                                <DropdownMenuLabel>Microphone Input</DropdownMenuLabel>
+                                                <DropdownMenuRadioGroup value={selectedMicrophoneId} onValueChange={setSelectedMicrophoneId}>
+                                                    <DropdownMenuRadioItem value="default">System Default</DropdownMenuRadioItem>
+                                                    {selectableMicrophones.map((device, index) => (
+                                                        <DropdownMenuRadioItem key={device.deviceId} value={device.deviceId}>
+                                                            {device.label?.trim() || `Microphone ${index + 1}`}
+                                                        </DropdownMenuRadioItem>
+                                                    ))}
+                                                </DropdownMenuRadioGroup>
+
+                                                {selectableMicrophones.length === 0 && (
+                                                    <DropdownMenuItem disabled>No specific microphones detected</DropdownMenuItem>
+                                                )}
+
+                                                <DropdownMenuSeparator />
+                                                <DropdownMenuItem
+                                                    onClick={() => {
+                                                        void refreshMicrophoneDevices(true, true);
+                                                    }}
+                                                    disabled={isLoadingMicrophones}
+                                                >
+                                                    {isLoadingMicrophones ? "Refreshing devices..." : "Refresh device list"}
+                                                </DropdownMenuItem>
+                                                <DropdownMenuSeparator />
+                                                <DropdownMenuItem disabled title={selectedMicrophoneLabel}>
+                                                    Selected: {selectedMicrophoneLabel}
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem disabled>
+                                                    Changes apply on next recording start
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    )}
+
+                                    {activeMainTab === "note" && (
+                                        <div className="flex items-center gap-2">
+                                            <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+                                                <SelectTrigger className="h-8 min-w-[240px] bg-background">
+                                                    <SelectValue placeholder={isLoadingNoteTemplates ? "Loading templates..." : "Select template"} />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {noteTemplates.map((template) => (
+                                                        <SelectItem key={template.id} value={template.id}>
+                                                            {template.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                className="h-8"
+                                                disabled={isGeneratingNote || !selectedTemplateId || !isTranscriptReadyForNote}
+                                                onClick={handleGenerateTemplateNote}
+                                                title={isTranscriptReadyForNote ? "Generate note" : "Transcript required before generating note"}
                                             >
-                                                {({ loading }) =>
-                                                    loading ? (
-                                                        <span className="text-[10px] text-muted-foreground">...</span>
-                                                    ) : (
-                                                        <Download className="h-4 w-4" />
-                                                    )
-                                                }
-                                            </PDFDownloadLink>
-                                        ) : (
+                                                {isGeneratingNote ? (
+                                                    <>
+                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                        Generating
+                                                    </>
+                                                ) : (
+                                                    "Generate"
+                                                )}
+                                            </Button>
+
                                             <Button
                                                 type="button"
                                                 size="icon"
                                                 variant="ghost"
-                                                className="h-8 w-8 rounded-sm"
-                                                disabled
-                                                title="Download PDF"
+                                                className={`h-8 w-8 rounded-sm ${activeNotePanel === "editor" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                                                onClick={() => setActiveNotePanel("editor")}
+                                                title="Editor"
                                             >
-                                                <Download className="h-4 w-4" />
+                                                <FileCode2 className="h-4 w-4" />
                                             </Button>
-                                        )}
+
+                                            <Button
+                                                type="button"
+                                                size="icon"
+                                                variant="ghost"
+                                                className={`h-8 w-8 rounded-sm ${activeNotePanel === "preview" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                                                onClick={() => setActiveNotePanel("preview")}
+                                                title="Preview"
+                                            >
+                                                <FileText className="h-4 w-4" />
+                                            </Button>
+
+                                            <Button
+                                                type="button"
+                                                size="icon"
+                                                variant="ghost"
+                                                className="h-8 w-8 rounded-sm text-zinc-700 hover:text-zinc-900"
+                                                title={isSavingNote ? "Saving..." : "Save note"}
+                                                disabled={isSavingNote || !isNoteDirty || !selectedTemplateId}
+                                                onClick={() => {
+                                                    void handleSaveTemplateNote();
+                                                }}
+                                            >
+                                                {isSavingNote ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                            </Button>
+
+                                            {selectedTemplate ? (
+                                                <PDFDownloadLink
+                                                    document={<NoteDocument template={selectedTemplate} llmObject={noteDocumentData} />}
+                                                    fileName={`${selectedTemplate.name.toLowerCase().replace(/\s+/g, "-")}.pdf`}
+                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-sm p-0 text-zinc-700 hover:bg-transparent hover:text-zinc-900"
+                                                    title="Download PDF"
+                                                >
+                                                    {({ loading }) =>
+                                                        loading ? (
+                                                            <span className="text-[10px] text-muted-foreground">...</span>
+                                                        ) : (
+                                                            <Download className="h-4 w-4" />
+                                                        )
+                                                    }
+                                                </PDFDownloadLink>
+                                            ) : (
+                                                <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="h-8 w-8 rounded-sm"
+                                                    disabled
+                                                    title="Download PDF"
+                                                >
+                                                    <Download className="h-4 w-4" />
+                                                </Button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className={`relative flex-1 min-h-0 p-4 ${activeMainTab === "note" ? "bg-white" : "bg-white/50 dark:bg-black/20"}`}>
+                                {isMainPanelBusy && (
+                                    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-white">
+                                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                                    </div>
+                                )}
+
+                                {activeMainTab === "transcript" ? (
+                                    <LiveTranscriptPanel
+                                        transcript={displayedTranscript}
+                                        draftTranscript={draftTranscript}
+                                        speakerRoles={speakerRoles}
+                                        transcriptEndRef={transcriptEndRef}
+                                    />
+                                ) : activeMainTab === "note" ? (
+                                    <div className="flex h-full min-h-0 flex-col gap-3">
+                                        {noteTemplates.length === 0 && !isLoadingNoteTemplates ? (
+                                            <div className="rounded-lg border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+                                                No active personal templates found. Activate templates in Note Studio to generate notes.
+                                            </div>
+                                        ) : null}
+
+                                        <div className="flex-1 min-h-0 overflow-y-auto px-1">
+                                            {activeNotePanel === "editor" ? (
+                                                selectedTemplate ? (
+                                                    <div className="space-y-4 pb-2">
+                                                        {selectedTemplate.bodySchema.fields.map((field) => {
+                                                            const currentValue = editableNoteData[field.key];
+
+                                                            return (
+                                                                <div key={field.key} className="space-y-1.5">
+                                                                    <label className="text-sm font-medium text-foreground">{field.label}</label>
+
+                                                                    {field.type === "boolean" ? (
+                                                                        <Select
+                                                                            value={String(currentValue ?? false)}
+                                                                            onValueChange={(value) => handleNoteFieldChange(field.key, value === "true")}
+                                                                        >
+                                                                            <SelectTrigger className="w-full bg-white">
+                                                                                <SelectValue placeholder="Select value" />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                <SelectItem value="true">True</SelectItem>
+                                                                                <SelectItem value="false">False</SelectItem>
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    ) : field.type === "number" ? (
+                                                                        <Input
+                                                                            type="number"
+                                                                            value={typeof currentValue === "number" ? String(currentValue) : ""}
+                                                                            onChange={(event) => {
+                                                                                const next = event.target.value;
+                                                                                handleNoteFieldChange(field.key, next === "" ? 0 : Number(next));
+                                                                            }}
+                                                                            className="bg-white"
+                                                                        />
+                                                                    ) : (
+                                                                        <Textarea
+                                                                            value={typeof currentValue === "string" ? currentValue : String(currentValue ?? "")}
+                                                                            onChange={(event) => handleNoteFieldChange(field.key, event.target.value)}
+                                                                            className="min-h-24 bg-white"
+                                                                        />
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Select an active template to start editing note fields.
+                                                    </p>
+                                                )
+                                            ) : generatedNoteText ? (
+                                                <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{generatedNoteText}</p>
+                                            ) : (
+                                                <p className="text-sm text-muted-foreground">
+                                                    Choose a template and click Generate to create note text from this session transcript.
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex h-full min-h-0 items-center justify-center rounded-xl border bg-background/70 p-8 text-center">
+                                        <div className="max-w-md space-y-3">
+                                            <div className="flex items-center justify-center gap-2 text-sm font-medium">
+                                                <Stethoscope className="h-4 w-4 text-muted-foreground" />
+                                                Session Context
+                                            </div>
+                                            <p className="text-sm text-muted-foreground">
+                                                Use the transcript tab to watch live speech bubbles render in the large sheet.
+                                            </p>
+                                        </div>
                                     </div>
                                 )}
                             </div>
-                        </div>
 
-                        <div className={`relative flex-1 min-h-0 p-4 ${activeMainTab === "note" ? "bg-white" : "bg-white/50 dark:bg-black/20"}`}>
-                            {isMainPanelBusy && (
-                                <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-white">
-                                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                                </div>
-                            )}
-
-                            {activeMainTab === "transcript" ? (
-                                <LiveTranscriptPanel
-                                    transcript={displayedTranscript}
-                                    draftTranscript={draftTranscript}
-                                    speakerRoles={speakerRoles}
-                                    transcriptEndRef={transcriptEndRef}
-                                />
-                            ) : activeMainTab === "note" ? (
-                                <div className="flex h-full min-h-0 flex-col gap-3">
-                                    {noteTemplates.length === 0 && !isLoadingNoteTemplates ? (
-                                        <div className="rounded-lg border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
-                                            No active personal templates found. Activate templates in Note Studio to generate notes.
-                                        </div>
-                                    ) : null}
-
-                                    <div className="flex-1 min-h-0 overflow-y-auto px-1">
-                                        {activeNotePanel === "editor" ? (
-                                            selectedTemplate ? (
-                                                <div className="space-y-4 pb-2">
-                                                    {selectedTemplate.bodySchema.fields.map((field) => {
-                                                        const currentValue = editableNoteData[field.key];
-
-                                                        return (
-                                                            <div key={field.key} className="space-y-1.5">
-                                                                <label className="text-sm font-medium text-foreground">{field.label}</label>
-
-                                                                {field.type === "boolean" ? (
-                                                                    <Select
-                                                                        value={String(currentValue ?? false)}
-                                                                        onValueChange={(value) => handleNoteFieldChange(field.key, value === "true")}
-                                                                    >
-                                                                        <SelectTrigger className="w-full bg-white">
-                                                                            <SelectValue placeholder="Select value" />
-                                                                        </SelectTrigger>
-                                                                        <SelectContent>
-                                                                            <SelectItem value="true">True</SelectItem>
-                                                                            <SelectItem value="false">False</SelectItem>
-                                                                        </SelectContent>
-                                                                    </Select>
-                                                                ) : field.type === "number" ? (
-                                                                    <Input
-                                                                        type="number"
-                                                                        value={typeof currentValue === "number" ? String(currentValue) : ""}
-                                                                        onChange={(event) => {
-                                                                            const next = event.target.value;
-                                                                            handleNoteFieldChange(field.key, next === "" ? 0 : Number(next));
-                                                                        }}
-                                                                        className="bg-white"
-                                                                    />
-                                                                ) : (
-                                                                    <Textarea
-                                                                        value={typeof currentValue === "string" ? currentValue : String(currentValue ?? "")}
-                                                                        onChange={(event) => handleNoteFieldChange(field.key, event.target.value)}
-                                                                        className="min-h-24 bg-white"
-                                                                    />
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            ) : (
-                                                <p className="text-sm text-muted-foreground">
-                                                    Select an active template to start editing note fields.
-                                                </p>
-                                            )
-                                        ) : generatedNoteText ? (
-                                            <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{generatedNoteText}</p>
-                                        ) : (
-                                            <p className="text-sm text-muted-foreground">
-                                                Choose a template and click Generate to create note text from this session transcript.
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-                            ) : (
-                                <div className="flex h-full min-h-0 items-center justify-center rounded-xl border bg-background/70 p-8 text-center">
-                                    <div className="max-w-md space-y-3">
-                                        <div className="flex items-center justify-center gap-2 text-sm font-medium">
-                                            <Stethoscope className="h-4 w-4 text-muted-foreground" />
-                                            Session Context
-                                        </div>
-                                        <p className="text-sm text-muted-foreground">
-                                            Use the transcript tab to watch live speech bubbles render in the large sheet.
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="p-2 border-t bg-muted/10 text-xs text-muted-foreground text-center">
-                            Review your note before use to ensure it accurately represents the visit
+                            <div className="p-2 border-t bg-muted/10 text-xs text-muted-foreground text-center">
+                                Review your note before use to ensure it accurately represents the visit
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1690,6 +1803,60 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                     )}
                 </div>
             </div>
+            </div>
+
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="absolute z-30 h-14 w-6 -translate-y-1/2 rounded-r-none rounded-l-lg border-r-0 bg-background/95 shadow-sm transition-all duration-300"
+                        style={{
+                            top: pullTabTop ? `${pullTabTop}px` : "50%",
+                            right: isChatPanelOpen ? "30rem" : "0.25rem",
+                        }}
+                        onClick={handleToggleChatPane}
+                        aria-label={isChatPanelOpen ? "Collapse chat sidebar" : "Expand chat sidebar"}
+                        aria-expanded={isChatPanelOpen}
+                        aria-controls="clinical-chat-panel"
+                    >
+                        {isChatPanelOpen
+                            ? <ChevronRight className="h-4 w-4" strokeWidth={2.75} />
+                            : <ChevronLeft className="h-4 w-4" strokeWidth={2.75} />}
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left">
+                    {isChatPanelOpen ? "Hide chat sidebar" : "Show chat sidebar"}
+                </TooltipContent>
+            </Tooltip>
+
+            <aside
+                id="clinical-chat-panel"
+                className={`h-full min-h-0 shrink-0 self-stretch border-l border-border/80 bg-card transition-all duration-300 ease-in-out ${isChatPanelOpen
+                    ? "w-[30rem] translate-x-0 opacity-100"
+                    : "w-0 translate-x-4 opacity-0 pointer-events-none"}`}
+            >
+                <div className={`flex h-full min-h-0 flex-col transition-opacity duration-200 ease-out ${isChatPanelContentVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+                    <div className="flex items-center justify-between bg-background px-4 py-3">
+                        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                            New chat
+                        </div>
+                        <Button type="button" variant="ghost" size="sm" className="h-8 text-muted-foreground">
+                            <span className="text-xs">New chat</span>
+                            <ChevronDown className="h-3 w-3" />
+                        </Button>
+                    </div>
+
+                    <div className="flex-1 min-h-0 overflow-hidden">
+                        <AssistantRuntimeProvider runtime={chatRuntime}>
+                            <Thread patientName={patientName} />
+                        </AssistantRuntimeProvider>
+                    </div>
+
+                </div>
+            </aside>
 
             <Dialog open={isProcessing} onOpenChange={() => {}}>
                 <DialogContent className="sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
