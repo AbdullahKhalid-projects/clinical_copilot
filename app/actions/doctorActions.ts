@@ -197,17 +197,28 @@ export async function getDoctorDashboardData() {
         appointments: totalAppointmentsToday,
         totalPatients: distinctPatients.length,
     },
-    appointments: appointments.map(appt => ({
-        id: appt.id,
-        patientId: appt.patientId, // Need this for navigation
-        patientName: appt.patient.user.name || "Unknown Patient",
-        // Add initials
-        patientInitials: (appt.patient.user.name || "U").split(' ').map(n => n[0]).join('').substring(0, 2),
-        date: appt.date.toLocaleDateString(),
-        time: appt.date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        type: appt.reason || "General Consultation",
-        status: appt.status,
-    }))
+    appointments: appointments
+      .filter((appt) => appt.patientId && appt.patient)
+      .map((appt) => {
+        const patientName = appt.patient?.user.name || "Unknown Patient";
+        return {
+          id: appt.id,
+          patientId: appt.patientId ?? "",
+          patientName,
+          patientInitials: patientName
+            .split(" ")
+            .map((n) => n[0])
+            .join("")
+            .substring(0, 2),
+          date: appt.date.toLocaleDateString(),
+          time: appt.date.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          type: appt.reason || "General Consultation",
+          status: String(appt.status),
+        };
+      })
   };
 }
 
@@ -251,6 +262,10 @@ export async function getDoctorPatients() {
   const patientMap = new Map();
 
   for (const appt of appointments) {
+    if (!appt.patientId || !appt.patient) {
+      continue;
+    }
+
     if (!patientMap.has(appt.patientId)) {
         const p = appt.patient;
         const lastVisit = p.appointments[0]?.date || null;
@@ -411,8 +426,8 @@ export async function getDoctorSchedule(dateStr?: string) {
 
   return appointments.map(appt => ({
     id: appt.id,
-    patientName: appt.patient.user.name || "Unknown",
-    patientId: appt.patientId,
+    patientName: appt.patient?.user.name || "Unknown",
+    patientId: appt.patientId ?? "",
     startTime: appt.date,
     durationMins: 30, // Defaulting to 30 mins as schema doesn't have duration. Could infer or add to schema later.
     status: appt.status,

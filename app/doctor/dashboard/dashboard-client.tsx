@@ -69,8 +69,8 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
     alert("Request Leave feature coming soon!");
   };
 
-  const handleStartAppointment = (patientId: string) => {
-    router.push(`/doctor/clinical-session?patientId=${patientId}`);
+  const handleStartAppointment = (appointmentId: string) => {
+    router.push(`/doctor/clinical-session/${appointmentId}`);
   };
 
   const { doctor, todaysOverview, appointments } = initialData;
@@ -207,7 +207,7 @@ export default function DashboardClient({ initialData }: { initialData: Dashboar
                     <Badge variant="secondary">{apt.type}</Badge>
                     <Button
                       size="sm"
-                      onClick={() => handleStartAppointment(apt.patientId)}
+                      onClick={() => handleStartAppointment(apt.id)}
                     >
                       Start
                     </Button>
