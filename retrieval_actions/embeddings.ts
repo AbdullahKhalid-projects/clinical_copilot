@@ -32,7 +32,10 @@ function getPineconeIndex() {
   const indexName = requireEnv("PINECONE_INDEX_NAME");
   const pc = new Pinecone({ apiKey });
   const indexHost = process.env.PINECONE_INDEX_HOST;
-  return pc.index(indexName, indexHost);
+  const baseIndex = pc.index(indexName, indexHost);
+  const namespace = process.env.PINECONE_NAMESPACE?.trim();
+
+  return namespace ? baseIndex.namespace(namespace) : baseIndex;
 }
 
 function getVoyageClient() {

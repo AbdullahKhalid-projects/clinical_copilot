@@ -45,7 +45,8 @@ import { SessionTabs, type ClinicalSessionTab } from "./components/session-tabs"
 import { LiveTranscriptPanel } from "./components/live-transcript-panel";
 import { SessionRecordingActions } from "./components/session-recording-actions";
 import { Thread } from "@/components/thread";
-import { AssistantRuntimeProvider, useLocalRuntime } from "@assistant-ui/react";
+import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
 import { confirmAndSaveAppointmentTranscription } from "../transcription-workflow-actions";
 import {
     generateAppointmentNoteFromTemplate,
@@ -90,6 +91,7 @@ import {
 } from "@/components/ui/tooltip";
 import {
     getClinicalSessionData,
+    getAppointmentPatientMetricCatalog,
     getAppointmentFinalizeChecklist,
     getDoctorPatientsForLinking,
     finalizeAppointmentSession,
@@ -120,6 +122,11 @@ const CLINICAL_CHAT_PANE_EVENT = "clinical:chat-pane-request";
 const CLINICAL_SUB_SIDEBAR_EVENT = "clinical:sub-sidebar-request";
 const CHAT_PANEL_TRANSITION_MS = 300;
 const CHAT_PANEL_CONTENT_FADE_DELAY_MS = 80;
+
+type MetricChatRequest = {
+    id: number;
+    metric: string;
+};
 
 function extractNoteTextFromPayload(rawSoapNote: any): string {
     if (!rawSoapNote || typeof rawSoapNote !== "object") {
@@ -347,6 +354,12 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [isFinalizeChecklistLoading, setIsFinalizeChecklistLoading] = React.useState(false);
     const [isFinalizingSession, setIsFinalizingSession] = React.useState(false);
     const [finalizeChecklistResult, setFinalizeChecklistResult] = React.useState<FinalizeChecklistResult | null>(null);
+    const [patientMetricCatalog, setPatientMetricCatalog] = React.useState<string[]>([]);
+    const [isMetricCatalogLoading, setIsMetricCatalogLoading] = React.useState(false);
+    const [metricCatalogError, setMetricCatalogError] = React.useState<string | null>(null);
+    const [metricCatalogSearch, setMetricCatalogSearch] = React.useState("");
+    const [pendingMetricChatRequest, setPendingMetricChatRequest] = React.useState<MetricChatRequest | null>(null);
+    const metricChatRequestIdRef = React.useRef(0);
     const hasAutoOpenedFinalizeRef = React.useRef(false);
         const hasMountedPanelRef = React.useRef(false);
         const panelRenderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1207,6 +1220,65 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         || (activeMainTab === "transcript" && isLiveConnecting)
         || (activeMainTab === "note" && (isLoadingNoteTemplates || isGeneratingNote || isSavingNote));
 
+    const loadPatientMetricCatalog = React.useCallback(async () => {
+        if (!currentAppointment?.id || !currentAppointment?.patient?.user?.id) {
+            setPatientMetricCatalog([]);
+            setMetricCatalogError(null);
+            return;
+        }
+
+        setIsMetricCatalogLoading(true);
+        setMetricCatalogError(null);
+        try {
+            const result = await getAppointmentPatientMetricCatalog(currentAppointment.id);
+            if (!result.success) {
+                setPatientMetricCatalog([]);
+                setMetricCatalogError(result.error || "Could not load patient metric catalog.");
+                return;
+            }
+
+            setPatientMetricCatalog(result.metrics);
+        } catch (error) {
+            console.error("Failed to load patient metric catalog", error);
+            setPatientMetricCatalog([]);
+            setMetricCatalogError("Could not load patient metric catalog.");
+        } finally {
+            setIsMetricCatalogLoading(false);
+        }
+    }, [currentAppointment?.id, currentAppointment?.patient?.user?.id]);
+
+    React.useEffect(() => {
+        void loadPatientMetricCatalog();
+    }, [loadPatientMetricCatalog]);
+
+    const filteredPatientMetrics = React.useMemo(() => {
+        const query = metricCatalogSearch.trim().toLowerCase();
+        if (!query) {
+            return patientMetricCatalog;
+        }
+
+        return patientMetricCatalog.filter((metric) => metric.includes(query));
+    }, [metricCatalogSearch, patientMetricCatalog]);
+
+    const handleMetricChatRequestHandled = React.useCallback((requestId: number) => {
+        setPendingMetricChatRequest((current) => {
+            if (!current || current.id !== requestId) {
+                return current;
+            }
+
+            return null;
+        });
+    }, []);
+
+    const handleMetricChipClick = React.useCallback((metric: string) => {
+        metricChatRequestIdRef.current += 1;
+        setIsChatPanelOpen(true);
+        setPendingMetricChatRequest({
+            id: metricChatRequestIdRef.current,
+            metric,
+        });
+    }, []);
+
     const handleDeleteAppointment = async () => {
         setIsDeletingAppointment(true);
         try {
@@ -1309,33 +1381,41 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         };
     }, []);
 
-    const localChatModelAdapter = React.useMemo(
-        () => ({
-            run: async ({ messages }: { messages: ReadonlyArray<{ role: string; content: ReadonlyArray<{ type: string; text?: string }> }> }) => {
-                const lastUserText = [...messages]
-                    .reverse()
-                    .find((message) => message.role === "user")
-                    ?.content.filter((part) => part.type === "text")
-                    .map((part) => part.text ?? "")
-                    .join(" ")
-                    .trim();
-
-                return {
-                    content: [
-                        {
-                            type: "text" as const,
-                            text: lastUserText
-                                ? `I captured your question: "${lastUserText}". Retrieval-backed generation will be connected next.`
-                                : "Ask a follow-up question and I can help draft the next clinical step.",
-                        },
-                    ],
-                };
+    const chatRuntime = useChatRuntime({
+        transport: new AssistantChatTransport({
+            api: "/api/chat",
+            body: {
+                chatContext: {
+                    appointmentId: currentAppointment?.id ?? null,
+                    patientProfileId: currentAppointment?.patient?.id ?? null,
+                    patientUserId: currentAppointment?.patient?.user?.id ?? null,
+                    patientMetricCatalog,
+                    includePatientDocuments: true,
+                },
             },
         }),
-        [],
-    );
+    });
 
-    const chatRuntime = useLocalRuntime(localChatModelAdapter);
+    React.useEffect(() => {
+        if (!pendingMetricChatRequest) {
+            return;
+        }
+
+        const { id, metric } = pendingMetricChatRequest;
+        const prompt = `Retrieving metric \"${metric}\" for this patient. Run structured retrieval for normalized metric \"${metric}\" and provide a concise clinical answer. Include a markdown table of values (Date, Metric, Value, Unit, Source) when available.`;
+
+        try {
+            chatRuntime.thread.append({
+                role: "user",
+                content: [{ type: "text", text: prompt }],
+                startRun: true,
+            });
+        } catch (error) {
+            console.error("Failed to append metric retrieval request", error);
+        } finally {
+            handleMetricChatRequestHandled(id);
+        }
+    }, [chatRuntime, handleMetricChatRequestHandled, pendingMetricChatRequest]);
 
     return (
         <div ref={rootContainerRef} className="relative flex h-[calc(100svh-3rem)] overflow-hidden bg-background">
@@ -1718,16 +1798,83 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="flex h-full min-h-0 items-center justify-center rounded-xl border bg-background/70 p-8 text-center">
-                                        <div className="max-w-md space-y-3">
-                                            <div className="flex items-center justify-center gap-2 text-sm font-medium">
+                                    <div className="flex h-full min-h-0 flex-col gap-3 rounded-xl border bg-background/70 p-4">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="flex items-center gap-2 text-sm font-medium">
                                                 <Stethoscope className="h-4 w-4 text-muted-foreground" />
-                                                Session Context
+                                                Patient Normalized Metric Catalog
                                             </div>
-                                            <p className="text-sm text-muted-foreground">
-                                                Use the transcript tab to watch live speech bubbles render in the large sheet.
-                                            </p>
+                                            <div className="flex items-center gap-2">
+                                                <Badge variant="outline" className="border-border bg-muted/40 text-xs">
+                                                    {patientMetricCatalog.length} metrics
+                                                </Badge>
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-8"
+                                                    onClick={() => {
+                                                        void loadPatientMetricCatalog();
+                                                    }}
+                                                    disabled={isMetricCatalogLoading || !hasLinkedPatient}
+                                                >
+                                                    {isMetricCatalogLoading ? (
+                                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                    ) : (
+                                                        <RotateCcw className="h-3.5 w-3.5" />
+                                                    )}
+                                                    Refresh
+                                                </Button>
+                                            </div>
                                         </div>
+
+                                        <p className="text-xs text-muted-foreground">
+                                            Chat retrieval maps your question to these normalized SQL metric keys before running structured queries.
+                                        </p>
+
+                                        <Input
+                                            value={metricCatalogSearch}
+                                            onChange={(event) => setMetricCatalogSearch(event.target.value.toLowerCase())}
+                                            placeholder="Search normalized metric keys (e.g. hemoglobin, creatinine, dlc)"
+                                            className="h-9 bg-background"
+                                            disabled={!hasLinkedPatient || isMetricCatalogLoading}
+                                        />
+
+                                        {!hasLinkedPatient ? (
+                                            <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground text-center">
+                                                Link a patient to load the normalized metric catalog for this session.
+                                            </div>
+                                        ) : metricCatalogError ? (
+                                            <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border border-red-200 bg-red-50/50 p-6 text-sm text-red-700 text-center">
+                                                {metricCatalogError}
+                                            </div>
+                                        ) : isMetricCatalogLoading ? (
+                                            <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border bg-muted/20 p-6 text-sm text-muted-foreground">
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                Loading normalized metrics...
+                                            </div>
+                                        ) : filteredPatientMetrics.length === 0 ? (
+                                            <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border bg-muted/20 p-6 text-sm text-muted-foreground text-center">
+                                                {patientMetricCatalog.length === 0
+                                                    ? "No normalized metrics were found for this patient yet."
+                                                    : "No metrics matched your search."}
+                                            </div>
+                                        ) : (
+                                            <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border bg-background p-3">
+                                                <div className="flex flex-wrap gap-2">
+                                                    {filteredPatientMetrics.map((metric) => (
+                                                        <button
+                                                            key={metric}
+                                                            type="button"
+                                                            onClick={() => handleMetricChipClick(metric)}
+                                                            className="rounded-md border border-border bg-muted px-2.5 py-1 font-mono text-[11px] transition-colors hover:bg-foreground hover:text-background"
+                                                        >
+                                                            {metric}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>

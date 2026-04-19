@@ -237,67 +237,51 @@ export async function getDoctorPatients() {
 
   const doctorProfile = dbUser.doctorProfile;
 
-  // Find all appointments for this doctor to get unique patients
-  const appointments = await prisma.appointment.findMany({
+  // Include all patient profiles so newly ingested patients can be linked,
+  // even before they have prior appointments with this doctor.
+  const patients = await prisma.patientProfile.findMany({
     where: {
-      doctorId: doctorProfile.id,
-      patientId: { not: null },
+      user: {
+        role: "PATIENT",
+      },
     },
     include: {
-      patient: {
-        include: {
-          user: true,
-          appointments: {
-             where: { doctorId: doctorProfile.id },
-             orderBy: { date: 'desc' },
-             take: 1 // To get last visit
-          }
-        }
-      }
+      user: true,
+      appointments: {
+        where: { doctorId: doctorProfile.id },
+        orderBy: { date: "desc" },
+      },
     },
-    orderBy: { date: 'desc' }
   });
 
-  // Unique Patients Map
-  const patientMap = new Map();
+  const now = new Date();
 
-  for (const appt of appointments) {
-    if (!appt.patientId || !appt.patient) {
-      continue;
-    }
+  const mappedPatients = patients.map((patient) => {
+    const doctorAppointments = patient.appointments;
+    const lastVisit = doctorAppointments[0]?.date || null;
 
-    if (!patientMap.has(appt.patientId)) {
-        const p = appt.patient;
-        const lastVisit = p.appointments[0]?.date || null;
-        
-        // Check for next appointment (future)
-        const nextAppointment = await prisma.appointment.findFirst({
-            where: {
-                patientId: p.id,
-                doctorId: doctorProfile.id,
-                date: { gt: new Date() },
-                status: { not: "CANCELLED" }
-            },
-            orderBy: { date: 'asc' }
-        });
+    const nextAppointment = [...doctorAppointments]
+      .filter((appointment) => appointment.date > now && appointment.status !== "CANCELLED")
+      .sort((a, b) => a.date.getTime() - b.date.getTime())[0];
 
-        patientMap.set(appt.patientId, {
-            id: p.id,
-            name: p.user.name || "Unknown",
-            email: p.user.email,
-            initials: (p.user.name || "U").split(' ').map((n: string) => n[0]).join('').substring(0, 2),
-            phone: p.phone,
-            dateOfBirth: p.dateOfBirth,
-            gender: p.gender,
-            lastVisit: lastVisit,
-            nextAppointment: nextAppointment ? nextAppointment.date : null,
-            status: nextAppointment ? "Upcoming" : "Past",
-            condition: p.conditions ? p.conditions.split(',')[0] : null 
-        });
-    }
-  }
+    const name = patient.user.name || "Unknown";
 
-  return Array.from(patientMap.values());
+    return {
+      id: patient.id,
+      name,
+      email: patient.user.email,
+      initials: name.split(" ").map((n: string) => n[0]).join("").substring(0, 2),
+      phone: patient.phone,
+      dateOfBirth: patient.dateOfBirth,
+      gender: patient.gender,
+      lastVisit,
+      nextAppointment: nextAppointment ? nextAppointment.date : null,
+      status: nextAppointment ? "Upcoming" : "Past",
+      condition: patient.conditions ? patient.conditions.split(",")[0] : null,
+    };
+  });
+
+  return mappedPatients.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function getPatientProfile(patientProfileId: string) {

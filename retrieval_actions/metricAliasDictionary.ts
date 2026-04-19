@@ -125,7 +125,7 @@ export const CANONICAL_METRICS: CanonicalMetricDefinition[] = [
   },
   {
     canonicalKey: "alanine aminotransferase",
-    aliases: ["alt", "sgpt", "alanine transaminase", "alanine aminotransferase"],
+    aliases: ["alt", "sgpt", "sbpt", "alanine transaminase", "alanine aminotransferase"],
   },
   {
     canonicalKey: "aspartate aminotransferase",

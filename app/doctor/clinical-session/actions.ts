@@ -236,6 +236,95 @@ export async function getClinicalSessionData(appointmentId: string) {
   return { ...appointment, patientImageUrl };
 }
 
+export type PatientMetricCatalogResult = {
+  success: boolean;
+  metrics: string[];
+  total: number;
+  error?: string;
+};
+
+function normalizeMetricCatalogKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+export async function getAppointmentPatientMetricCatalog(
+  appointmentId: string
+): Promise<PatientMetricCatalogResult> {
+  const doctor = await getCurrentDoctor();
+  if (!doctor) {
+    return {
+      success: false,
+      metrics: [],
+      total: 0,
+      error: "Doctor profile not found",
+    };
+  }
+
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      doctorId: doctor.id,
+    },
+    select: {
+      patient: {
+        select: {
+          userId: true,
+        },
+      },
+    },
+  });
+
+  if (!appointment) {
+    return {
+      success: false,
+      metrics: [],
+      total: 0,
+      error: "Appointment not found",
+    };
+  }
+
+  const patientUserId = appointment.patient?.userId;
+  if (!patientUserId) {
+    return {
+      success: true,
+      metrics: [],
+      total: 0,
+    };
+  }
+
+  const rows = await prisma.medicalReportValue.findMany({
+    where: {
+      userId: patientUserId,
+      keyNormalized: {
+        not: null,
+      },
+    },
+    select: {
+      keyNormalized: true,
+    },
+    distinct: ["keyNormalized"],
+  });
+
+  const metrics = rows
+    .map((row) => row.keyNormalized)
+    .filter((value): value is string => Boolean(value && value.trim().length > 0))
+    .map((value) => normalizeMetricCatalogKey(value))
+    .filter((value) => value.length > 0)
+    .sort((a, b) => a.localeCompare(b));
+
+  const deduped = Array.from(new Set(metrics));
+
+  return {
+    success: true,
+    metrics: deduped,
+    total: deduped.length,
+  };
+}
+
 export async function updateAppointmentRecording(appointmentId: string, recordingUrl: string) {
   const user = await currentUser();
   if (!user) {
@@ -320,10 +409,8 @@ export async function getDoctorPatientsForLinking(): Promise<LinkablePatient[]> 
 
   const patients = await prisma.patientProfile.findMany({
     where: {
-      appointments: {
-        some: {
-          doctorId: doctor.id,
-        },
+      user: {
+        role: "PATIENT",
       },
     },
     include: {

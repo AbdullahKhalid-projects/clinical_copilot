@@ -1,4 +1,5 @@
-"use server";
+// Retrieval generation utilities — merging, prompt building, citation formatting.
+// This is a shared utility module imported by API routes and server actions.
 
 import type { ParentSearchResult } from "@/retrieval_actions/actions";
 import type {
@@ -68,13 +69,20 @@ const DEFAULT_MAX_CHUNK_CHARS = 1200;
 const DEFAULT_MAX_TOTAL_CHARS = 9000;
 
 const BASE_SYSTEM_PROMPT = [
+  "=== CLINICAL COPILOT: EVIDENCE MODE ===",
   "You are a clinical assistant helping a licensed clinician.",
   "Ground every statement in the supplied evidence context.",
   "If evidence is insufficient, explicitly say what is missing.",
   "Do not invent labs, diagnoses, medications, dates, or ranges.",
+  "When requested data is unavailable, do not speculate about possible conditions.",
   "Keep the answer clinically useful, clear, and actionable.",
   "When referencing evidence, cite chunk IDs in square brackets, e.g. [CTX-1].",
-].join(" ");
+  "",
+  "=== STRUCTURED SQL MAPPING MODE ===",
+  "Treat metric retrieval as a mapping from user phrasing to normalized SQL metric keys provided by retrieval evidence.",
+  "If mapping evidence indicates no matching metric, state that directly and request the exact normalized metric from the available catalog.",
+  "Prefer presenting objective values and tables before interpretation.",
+].join("\n");
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -102,16 +110,95 @@ function formatObservationLine(observation: MetricObservation): string {
   return `${formatIsoDate(observation.observedAt)} | ${observation.key}: ${observation.value}${unit} | source=${source}`;
 }
 
-function formatAbnormalLine(item: AbnormalMetricObservation): string {
-  const observation = item.observation;
-  const below = item.deviation.below !== null ? `below=${item.deviation.below}` : "";
-  const above = item.deviation.above !== null ? `above=${item.deviation.above}` : "";
-  const deviation = [below, above].filter((part) => part.length > 0).join(" ");
-  const rangeText = `normal=${item.normalRange.min}-${item.normalRange.max}${
-    item.normalRange.unit ? ` ${item.normalRange.unit}` : ""
-  }`;
+function splitValueAndUnit(observation: MetricObservation): { value: string; unit: string } {
+  const value = observation.value?.trim() || "-";
+  const unit = observation.unit?.trim() || "-";
+  return { value, unit };
+}
 
-  return `${formatObservationLine(observation)} | ${rangeText}${deviation ? ` | ${deviation}` : ""}`;
+function formatMetricHistoryTable(observations: MetricObservation[]): string {
+  if (observations.length === 0) {
+    return "No metric history was found for the requested criteria.";
+  }
+
+  const header = ["Date", "Metric", "Value", "Unit", "Source"];
+  const separator = header.map(() => "---");
+  const body = observations.map((observation) => {
+    const { value, unit } = splitValueAndUnit(observation);
+    return [
+      formatIsoDate(observation.observedAt),
+      observation.key,
+      value,
+      unit,
+      observation.source.documentTitle || "Untitled Report",
+    ];
+  });
+
+  return [header, separator, ...body]
+    .map((cells) => `| ${cells.join(" | ")} |`)
+    .join("\n");
+}
+
+function formatAbnormalTable(items: AbnormalMetricObservation[]): string {
+  if (items.length === 0) {
+    return "No abnormal readings were found for the requested criteria.";
+  }
+
+  const header = ["Date", "Metric", "Value", "Unit", "Normal Range", "Deviation", "Source"];
+  const separator = header.map(() => "---");
+
+  const body = items.map((item) => {
+    const { observation } = item;
+    const { value, unit } = splitValueAndUnit(observation);
+    const range = `${item.normalRange.min}-${item.normalRange.max}${
+      item.normalRange.unit ? ` ${item.normalRange.unit}` : ""
+    }`;
+    const deviation =
+      item.deviation.below !== null
+        ? `below ${item.deviation.below}`
+        : item.deviation.above !== null
+          ? `above ${item.deviation.above}`
+          : "-";
+
+    return [
+      formatIsoDate(observation.observedAt),
+      observation.key,
+      value,
+      unit,
+      range,
+      deviation,
+      observation.source.documentTitle || "Untitled Report",
+    ];
+  });
+
+  return [header, separator, ...body]
+    .map((cells) => `| ${cells.join(" | ")} |`)
+    .join("\n");
+}
+
+function formatPanelHistoryTable(
+  columns: string[],
+  rows: Array<{
+    observedAt: Date;
+    sourceDocumentTitle: string;
+    values: Record<string, string | null>;
+  }>
+): string {
+  if (rows.length === 0) {
+    return "No panel history rows were found for the requested criteria.";
+  }
+
+  const header = ["Date", ...columns, "Source"];
+  const separator = header.map(() => "---");
+  const body = rows.map((row) => [
+    formatIsoDate(row.observedAt),
+    ...columns.map((column) => row.values[column] ?? "-"),
+    row.sourceDocumentTitle || "Untitled Report",
+  ]);
+
+  return [header, separator, ...body]
+    .map((cells) => `| ${cells.join(" | ")} |`)
+    .join("\n");
 }
 
 export function structuredResultToChunks(
@@ -147,13 +234,14 @@ export function structuredResultToChunks(
 
     case "GET_METRIC_HISTORY": {
       const selected = result.observations.slice(0, maxItems);
+      const panelRows = result.panelRows?.slice(0, maxItems) ?? [];
+      const hasPanel = Boolean(result.panelColumns && result.panelColumns.length > 0 && panelRows.length > 0);
       return [
         {
           title: `Structured history ${result.metric}`,
-          text:
-            selected.length > 0
-              ? selected.map(formatObservationLine).join("\n")
-              : "No metric history was found for the requested criteria.",
+          text: hasPanel
+            ? formatPanelHistoryTable(result.panelColumns ?? [], panelRows)
+            : formatMetricHistoryTable(selected),
           score: 1,
         },
       ];
@@ -170,7 +258,11 @@ export function structuredResultToChunks(
       return [
         {
           title: `Structured trend ${result.metric}`,
-          text: [trendSummary, ...selected.map(formatObservationLine)].join("\n"),
+          text: [
+            trendSummary,
+            "",
+            formatMetricHistoryTable(selected),
+          ].join("\n"),
           score: 1,
         },
       ];
@@ -183,10 +275,7 @@ export function structuredResultToChunks(
           title: result.metric
             ? `Structured abnormal ${result.metric}`
             : "Structured abnormal readings",
-          text:
-            selected.length > 0
-              ? selected.map(formatAbnormalLine).join("\n")
-              : "No abnormal readings were found for the requested criteria.",
+          text: formatAbnormalTable(selected),
           score: 1,
         },
       ];
@@ -347,6 +436,9 @@ export function buildGenerationPrompt(
     "",
     "Answer requirements:",
     responseStyleInstruction,
+    "If structured evidence reports no matching rows for the requested metric, state that clearly, list the missing data fields, and avoid differential diagnosis speculation.",
+    "When structured evidence contains clinical values over time, include a markdown table of actual values (with Date, Metric, Value, Unit, Source) before your interpretation.",
+    "For panel metrics (for example DLC), preserve and present the full table rows from evidence; do not collapse to prose-only summaries.",
     "Separate uncertain conclusions from supported findings.",
     "Reference evidence chunk IDs for factual claims.",
     "If there is a contradiction across chunks, call it out explicitly.",

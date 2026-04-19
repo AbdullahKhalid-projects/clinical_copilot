@@ -5,6 +5,7 @@ import {
   getParentTexts,
   rerankDocuments,
 } from "@/retrieval_actions/embeddings";
+import { prisma } from "@/lib/prisma";
 
 export interface ParentSearchResult {
   parentChunkId: string;
@@ -12,6 +13,188 @@ export interface ParentSearchResult {
   documentId: string;
   documentTitle: string;
   score: number;
+}
+
+export type RetrievalTypeFilter = "medicine" | "disease" | "patient" | "all";
+
+export interface SearchVectorDatabaseOptions {
+  includePatientDocuments?: boolean;
+  patientUserId?: string | null;
+  patientProfileId?: string | null;
+}
+
+type RetrievalDocumentType = "medicine" | "disease" | "patient";
+
+type PatientScope = {
+  patientUserId: string | null;
+  patientProfileId: string | null;
+};
+
+function getAllowedTypes(
+  typeFilter: RetrievalTypeFilter,
+  includePatientDocuments: boolean
+): RetrievalDocumentType[] {
+  if (typeFilter === "medicine") {
+    return ["medicine"];
+  }
+
+  if (typeFilter === "disease") {
+    return ["disease"];
+  }
+
+  if (typeFilter === "patient") {
+    return includePatientDocuments ? ["patient"] : [];
+  }
+
+  return includePatientDocuments
+    ? ["medicine", "disease", "patient"]
+    : ["medicine", "disease"];
+}
+
+function mapDocumentToRetrievalType(document: {
+  type: string;
+  ragSubtype: string | null;
+}): RetrievalDocumentType | null {
+  if (document.type === "PATIENT") {
+    return "patient";
+  }
+
+  if (document.type !== "RAG") {
+    return null;
+  }
+
+  if (document.ragSubtype === "MEDICINE") {
+    return "medicine";
+  }
+
+  if (document.ragSubtype === "DISEASE") {
+    return "disease";
+  }
+
+  return null;
+}
+
+function isDocumentAllowed(
+  document: {
+    type: string;
+    ragSubtype: string | null;
+    userId: string | null;
+  },
+  allowedTypes: Set<RetrievalDocumentType>,
+  patientUserId: string | null
+): boolean {
+  const retrievalType = mapDocumentToRetrievalType(document);
+  if (!retrievalType || !allowedTypes.has(retrievalType)) {
+    return false;
+  }
+
+  // Patient documents must be explicitly scoped to a single patient user.
+  if (retrievalType === "patient") {
+    if (!patientUserId) {
+      return false;
+    }
+    return document.userId === patientUserId;
+  }
+
+  return true;
+}
+
+async function resolvePatientScope(options?: SearchVectorDatabaseOptions): Promise<PatientScope> {
+  const patientUserId = options?.patientUserId?.trim() || null;
+  const patientProfileId = options?.patientProfileId?.trim() || null;
+
+  if (patientUserId) {
+    return {
+      patientUserId,
+      patientProfileId,
+    };
+  }
+
+  if (!patientProfileId) {
+    return {
+      patientUserId: null,
+      patientProfileId: null,
+    };
+  }
+
+  const profile = await prisma.patientProfile.findUnique({
+    where: { id: patientProfileId },
+    select: { userId: true },
+  });
+
+  return {
+    patientUserId: profile?.userId ?? null,
+    patientProfileId,
+  };
+}
+
+function buildPineconeFilter(
+  allowedTypeList: RetrievalDocumentType[],
+  patientScope: PatientScope
+): Record<string, unknown> | null {
+  if (allowedTypeList.length === 0) {
+    return null;
+  }
+
+  const nonPatientTypes = allowedTypeList.filter((type) => type !== "patient");
+  const includesPatientType = allowedTypeList.includes("patient");
+
+  const patientScopeFilters: Array<Record<string, string>> = [];
+
+  if (patientScope.patientUserId) {
+    patientScopeFilters.push(
+      { userId: patientScope.patientUserId },
+      { patientUserId: patientScope.patientUserId },
+      { ownerUserId: patientScope.patientUserId }
+    );
+  }
+
+  if (patientScope.patientProfileId) {
+    patientScopeFilters.push(
+      { patientProfileId: patientScope.patientProfileId },
+      { profileId: patientScope.patientProfileId }
+    );
+  }
+
+  if (!includesPatientType) {
+    return nonPatientTypes.length === 1
+      ? { type: nonPatientTypes[0] }
+      : { type: { $in: nonPatientTypes } };
+  }
+
+  // Do not query patient vectors unless we have explicit patient scope.
+  if (patientScopeFilters.length === 0) {
+    if (nonPatientTypes.length === 0) {
+      return null;
+    }
+
+    return nonPatientTypes.length === 1
+      ? { type: nonPatientTypes[0] }
+      : { type: { $in: nonPatientTypes } };
+  }
+
+  const patientCondition: Record<string, unknown> = {
+    $and: [
+      { type: "patient" },
+      { $or: patientScopeFilters },
+    ],
+  };
+
+  if (nonPatientTypes.length === 0) {
+    return patientCondition;
+  }
+
+  const nonPatientCondition: Record<string, unknown> =
+    nonPatientTypes.length === 1
+      ? { type: nonPatientTypes[0] }
+      : { type: { $in: nonPatientTypes } };
+
+  return {
+    $or: [
+      nonPatientCondition,
+      patientCondition,
+    ],
+  };
 }
 
 /**
@@ -24,30 +207,42 @@ export interface ParentSearchResult {
 export async function searchVectorDatabase(
   query: string,
   topK: number = 50,
-  typeFilter: "medicine" | "disease" | "all" = "all"
+  typeFilter: RetrievalTypeFilter = "all",
+  options?: SearchVectorDatabaseOptions
 ): Promise<ParentSearchResult[]> {
   if (!query.trim()) {
     return [];
   }
 
   try {
-    // Build filter - ALWAYS exclude patient documents
-    let filter: Record<string, unknown>;
+    const includePatientDocuments = options?.includePatientDocuments === true;
+    const patientScope = await resolvePatientScope(options);
+    const patientUserId = patientScope.patientUserId;
 
-    if (typeFilter === "all") {
-      // Query both medicine and disease, but NEVER patient
-      filter = {
-        type: { $in: ["medicine", "disease"] },
-      };
-    } else {
-      // Query specific type (medicine or disease)
-      filter = {
-        type: typeFilter,
-      };
+    const allowedTypeList = getAllowedTypes(typeFilter, includePatientDocuments);
+    if (allowedTypeList.length === 0) {
+      return [];
     }
 
-    // Query for more results to aggregate by parent
-    const childResults = await querySimilarDocuments(query, topK, filter);
+    // Coarse Pinecone filter with optional patient scope. Access is re-validated via DB below.
+    const filter = buildPineconeFilter(allowedTypeList, patientScope);
+    if (!filter) {
+      return [];
+    }
+
+    // Query for more results to aggregate by parent.
+    // If patient-scoped filtering returns nothing (common when ingestion metadata keys differ),
+    // retry without a metadata filter and enforce patient constraints via DB metadata below.
+    let childResults = await querySimilarDocuments(query, topK, filter);
+
+    const hasExplicitPatientScope =
+      includePatientDocuments &&
+      (patientScope.patientUserId !== null || patientScope.patientProfileId !== null);
+
+    if (childResults.length === 0 && hasExplicitPatientScope) {
+      const fallbackTopK = Math.min(Math.max(topK * 4, 100), 400);
+      childResults = await querySimilarDocuments(query, fallbackTopK);
+    }
 
     if (childResults.length === 0) {
       return [];
@@ -110,9 +305,44 @@ export async function searchVectorDatabase(
       score: data.maxScore,
     }));
 
+    // Enforce retrieval access/type constraints against canonical DB metadata.
+    const documentIds = Array.from(
+      new Set(
+        intermediateResults
+          .map((result) => result.documentId)
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+      )
+    );
+
+    if (documentIds.length === 0) {
+      return [];
+    }
+
+    const documents = await prisma.document.findMany({
+      where: { id: { in: documentIds } },
+      select: {
+        id: true,
+        type: true,
+        ragSubtype: true,
+        userId: true,
+      },
+    });
+
+    const documentsById = new Map(documents.map((document) => [document.id, document]));
+    const allowedTypes = new Set<RetrievalDocumentType>(allowedTypeList);
+
+    const accessFilteredResults = intermediateResults.filter((result) => {
+      const document = documentsById.get(result.documentId);
+      if (!document) {
+        return false;
+      }
+
+      return isDocumentAllowed(document, allowedTypes, patientUserId);
+    });
+
     // Filter to only unique parent texts
     const seenTexts = new Set<string>();
-    const uniqueResults = intermediateResults.filter((result) => {
+    const uniqueResults = accessFilteredResults.filter((result) => {
       if (!result.parentText || seenTexts.has(result.parentText)) {
         return false;
       }
