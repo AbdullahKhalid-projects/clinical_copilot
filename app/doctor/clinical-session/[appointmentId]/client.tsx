@@ -301,6 +301,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         CANCELLED: "border-red-300 bg-red-100/70 text-red-900",
     };
     const statusBadgeClass = statusBadgeClassMap[currentAppointment.status] || "border-border bg-muted/70 text-foreground";
+    const pythonBackendUrl = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL?.trim() || "http://localhost:8000";
 
         const {
                 connect,
@@ -312,7 +313,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                 speakerRoles,
                 sendAudioChunk,
                 stopSession,
-        } = useClinicalWebSocket("http://localhost:8000");
+        } = useClinicalWebSocket(pythonBackendUrl);
 
   // State for recording and devices
   const [isUploading, setIsUploading] = React.useState(false);
@@ -1402,7 +1403,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         }
 
         const { id, metric } = pendingMetricChatRequest;
-        const prompt = `Retrieving metric \"${metric}\" for this patient. Run structured retrieval for normalized metric \"${metric}\" and provide a concise clinical answer. Include a markdown table of values (Date, Metric, Value, Unit, Source) when available.`;
+        const prompt = `Run structured retrieval for normalized metric "${metric}" for this patient. Return complete metric history (all available readings), render the full markdown table (Date, Metric, Value, Unit, Source), and also call out the most recent reading separately.`;
 
         try {
             chatRuntime.thread.append({
@@ -1829,6 +1830,10 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                         </div>
 
                                         <p className="text-xs text-muted-foreground">
+                                            Patient context will be shown here, including their reports and metrics.
+                                        </p>
+
+                                        <p className="text-xs text-muted-foreground">
                                             Chat retrieval maps your question to these normalized SQL metric keys before running structured queries.
                                         </p>
 
@@ -1887,7 +1892,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                 </div>
             </main>
 
-            <div className="border-t border-stone-200 bg-stone-50/95 backdrop-blur px-4 sm:px-5 py-2.5">
+            <div className="border-t border-border bg-background px-4 sm:px-5 py-2.5">
                 <div className={`mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center ${isSessionFinalized ? "sm:justify-start" : "sm:justify-between"}`}>
                     <div className="flex min-w-0 items-center">
                         <div className="min-w-0 flex-1 overflow-x-auto">

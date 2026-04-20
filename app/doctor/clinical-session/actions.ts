@@ -1,6 +1,10 @@
 "use server";
 
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { uploadVisitSummaryPdf } from "@/lib/uploadthing-server";
+import { buildVisitSummaryFilename, formatVisitSummaryDateLabel, renderVisitSummaryPdfBuffer } from "@/lib/visit-summary-pdf";
+import { markSoapNoteAsFinalized } from "@/lib/visit-summary";
 import { currentUser, clerkClient } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -584,11 +588,32 @@ export async function getAppointmentFinalizeChecklist(appointmentId: string): Pr
     },
     select: {
       id: true,
+      date: true,
+      reason: true,
       status: true,
       aiStatus: true,
       patientId: true,
       transcript: true,
       soapNote: true,
+      doctor: {
+        select: {
+          specialization: true,
+          user: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+      patient: {
+        select: {
+          user: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
     },
   });
 
@@ -638,11 +663,32 @@ export async function finalizeAppointmentSession(appointmentId: string): Promise
     },
     select: {
       id: true,
+      date: true,
+      reason: true,
       status: true,
       aiStatus: true,
       patientId: true,
       transcript: true,
       soapNote: true,
+      doctor: {
+        select: {
+          specialization: true,
+          user: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+      patient: {
+        select: {
+          user: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
     },
   });
 
@@ -675,16 +721,60 @@ export async function finalizeAppointmentSession(appointmentId: string): Promise
     };
   }
 
+  const finalizedAtIso = new Date().toISOString();
+  const finalizedSoapNote = markSoapNoteAsFinalized(appointment.soapNote, finalizedAtIso);
+  const fallbackDownloadUrl = `/api/patient/visit-summaries/${appointment.id}/download`;
+
+  const patientName = appointment.patient?.user?.name?.trim() || "Patient";
+  const doctorName = appointment.doctor?.user?.name?.trim()
+    ? `Dr. ${appointment.doctor.user.name.trim()}`
+    : appointment.doctor?.specialization
+      ? `Dr. ${appointment.doctor.specialization}`
+      : "Care Team";
+  const visitDateLabel = formatVisitSummaryDateLabel(appointment.date);
+  const reason = appointment.reason?.trim() || "Clinical follow-up";
+  const noteText = typeof finalizedSoapNote.noteText === "string" ? finalizedSoapNote.noteText : "";
+
+  let noteDownloadUrl = fallbackDownloadUrl;
+
+  if (noteText.trim().length > 0) {
+    try {
+      const filename = buildVisitSummaryFilename(patientName, visitDateLabel);
+      const pdfBuffer = await renderVisitSummaryPdfBuffer({
+        patientName,
+        doctorName,
+        visitDate: visitDateLabel,
+        reason,
+        noteText,
+      });
+
+      const uploadedUrl = await uploadVisitSummaryPdf({
+        filename,
+        pdfBuffer,
+      });
+
+      if (uploadedUrl) {
+        noteDownloadUrl = uploadedUrl;
+      }
+    } catch (error) {
+      console.error("Failed to persist visit summary PDF; using fallback route", error);
+    }
+  }
+
   await prisma.appointment.update({
     where: { id: appointment.id },
     data: {
       status: "COMPLETED",
+      soapNote: finalizedSoapNote as Prisma.InputJsonValue,
+      soapNoteUrl: noteDownloadUrl,
     },
   });
 
   revalidatePath(`/doctor/clinical-session/${appointment.id}`);
   revalidatePath("/doctor/clinical-session");
   revalidatePath("/doctor/dashboard");
+  revalidatePath("/patient/visit-summaries");
+  revalidatePath("/patient/dashboard");
 
   return {
     success: true,

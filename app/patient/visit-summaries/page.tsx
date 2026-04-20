@@ -1,19 +1,15 @@
-"use client";
+import { format } from "date-fns";
+import { AlertCircle, Calendar, Download, FileText, ShieldCheck, User } from "lucide-react";
 
-import { Calendar, Download, Eye, FileText, User } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { getPatientVisitSummaries } from "@/app/actions/fetchers";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { visitSummaries } from "@/lib/mockData";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 
-export default function VisitSummariesPage() {
-  const handleView = (id: string) => {
-    alert(`Viewing visit summary: ${id}`);
-  };
-
-  const handleDownload = (id: string) => {
-    alert(`Downloading visit summary: ${id}`);
-  };
+export default async function VisitSummariesPage() {
+  const summaries = await getPatientVisitSummaries();
 
   return (
     <div className="h-full flex-1 flex-col space-y-0 md:flex">
@@ -30,11 +26,11 @@ export default function VisitSummariesPage() {
                     After Visit Summaries
                   </h1>
                   <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">
-                    After Visit
+                    Finalized Notes
                   </Badge>
                 </div>
                 <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
-                  Review and download summaries from your recent appointments
+                  Download notes finalized by your care team after each completed visit.
                 </span>
               </div>
             </div>
@@ -43,82 +39,85 @@ export default function VisitSummariesPage() {
           <div className="flex flex-wrap items-center gap-1.5 text-sm">
             <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
               <FileText className="h-3.5 w-3.5" />
-              <span>{visitSummaries.length} Summaries</span>
-            </Badge>
-            <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
-              <Eye className="h-3.5 w-3.5" />
-              <span>View Details</span>
+              <span>{summaries.length} Summaries</span>
             </Badge>
             <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
               <Download className="h-3.5 w-3.5" />
-              <span>Download PDF</span>
+              <span>Secure PDF Download</span>
             </Badge>
           </div>
         </div>
       </header>
 
       <div className="space-y-4 px-4 sm:px-5 pt-6 pb-8">
-        {visitSummaries.map((visit) => (
-          <Card key={visit.id}>
-            <CardContent className="p-6">
-              <div className="flex items-start justify-between">
-                <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <FileText className="w-6 h-6 text-primary" />
-                  </div>
-                  <div className="space-y-1">
-                    <h3 className="font-semibold text-foreground">{visit.title}</h3>
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-4 h-4" />
-                        {visit.date}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <User className="w-4 h-4" />
-                        {visit.doctorName}
-                      </span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{visit.description}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleView(visit.id)}
-                    className="flex items-center gap-1"
-                  >
-                    <Eye className="w-4 h-4" />
-                    View
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDownload(visit.id)}
-                    className="flex items-center gap-1"
-                  >
-                    <Download className="w-4 h-4" />
-                    Download
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-
-        {visitSummaries.length === 0 && (
+        {summaries.length === 0 ? (
           <Card>
-            <CardContent className="p-12 text-center">
-              <FileText className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-              <h3 className="text-lg font-medium text-foreground mb-2">
-                No visit summaries yet
-              </h3>
-              <p className="text-muted-foreground">
-                Your visit summaries will appear here after your appointments.
+            <CardContent className="p-10 text-center">
+              <FileText className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+              <h2 className="text-lg font-semibold text-foreground">No finalized visit summaries yet</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Visit summaries will appear here after a completed appointment with a finalized note.
               </p>
             </CardContent>
           </Card>
+        ) : (
+          summaries.map((summary) => (
+            <Card key={summary.id} className="gap-0">
+              <CardHeader className="pb-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-1">
+                    <CardTitle className="text-base font-semibold">
+                      Visit Summary - {format(new Date(summary.appointmentDate), "MMMM d, yyyy")}
+                    </CardTitle>
+                    <CardDescription>{summary.reason}</CardDescription>
+                  </div>
+
+                  <Button asChild size="sm" className="w-full sm:w-auto">
+                    <a
+                      href={summary.downloadUrl}
+                      target={summary.downloadUrl.startsWith("http") ? "_blank" : undefined}
+                      rel={summary.downloadUrl.startsWith("http") ? "noreferrer" : undefined}
+                    >
+                      <Download className="h-4 w-4" />
+                      Download Note
+                    </a>
+                  </Button>
+                </div>
+              </CardHeader>
+
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <Badge variant="outline" className="gap-1.5 bg-muted/60 border-border">
+                    <Calendar className="h-3.5 w-3.5" />
+                    {format(new Date(summary.appointmentDate), "MMM d, yyyy")}
+                  </Badge>
+                  <Badge variant="outline" className="gap-1.5 bg-muted/60 border-border">
+                    <User className="h-3.5 w-3.5" />
+                    {summary.doctorName}
+                  </Badge>
+                  <Badge variant="outline" className="gap-1.5 bg-muted/60 border-border">
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    Finalized {format(new Date(summary.finalizedAt ?? summary.appointmentDate), "MMM d, yyyy")}
+                  </Badge>
+                </div>
+
+                <Separator />
+
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <p className="text-sm leading-6 text-muted-foreground">{summary.noteExcerpt}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))
         )}
+
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Download Access</AlertTitle>
+          <AlertDescription>
+            Only notes linked to your account can be downloaded from this page.
+          </AlertDescription>
+        </Alert>
       </div>
     </div>
   );

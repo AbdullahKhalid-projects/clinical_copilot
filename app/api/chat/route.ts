@@ -22,7 +22,9 @@ const RAG_MODEL_BASE_URL =
 const RAG_MODEL_NAME = "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit";
 const RAG_MODEL_API_KEY = process.env.RAG_MODEL_API_KEY ?? "dummy-key";
 const RAG_MAX_CONTEXT_CHUNKS = 8;
-const RAG_MAX_TOTAL_CHARS = 7000;
+const RAG_MAX_CHUNK_CHARS = 14000;
+const RAG_MAX_TOTAL_CHARS = 28000;
+const STRUCTURED_HISTORY_MAX_ITEMS = 300;
 const CONVERSATION_CONTEXT_MAX_MESSAGES = 6;
 const THINK_OPEN_TAG = "<think>";
 const THINK_CLOSE_TAG = "</think>";
@@ -47,6 +49,12 @@ function longestTagPrefixAtEnd(text: string, tag: string): number {
 function createStripThinkTransform() {
   let pending = "";
   let insideThink = false;
+
+  const stripInternalChunkRefs = (value: string): string =>
+    value
+      .replace(/\s*\[CTX-(?:[A-Z]-)?\d+\]/gi, "")
+      .replace(/\bCTX-(?:[A-Z]-)?\d+\b/gi, "")
+      .replace(/\s{2,}/g, " ");
 
   const processText = (incomingText: string): string => {
     const combined = `${pending}${incomingText}`;
@@ -125,7 +133,7 @@ function createStripThinkTransform() {
         }
 
         if (part.type === "text-delta" && typeof part.delta === "string") {
-          const sanitizedDelta = processText(part.delta);
+          const sanitizedDelta = stripInternalChunkRefs(processText(part.delta));
           if (sanitizedDelta.length === 0) {
             return;
           }
@@ -138,7 +146,7 @@ function createStripThinkTransform() {
         }
 
         if (part.type === "text" && typeof part.text === "string") {
-          const sanitizedText = processText(part.text);
+          const sanitizedText = stripInternalChunkRefs(processText(part.text));
           if (sanitizedText.length === 0) {
             return;
           }
@@ -153,6 +161,32 @@ function createStripThinkTransform() {
         controller.enqueue(part);
       },
     });
+}
+
+function formatChatStreamError(error: unknown): string {
+  const fallback =
+    "I ran into a temporary model response issue while generating your answer. Please retry in a moment.";
+
+  if (!error || typeof error !== "object") {
+    return fallback;
+  }
+
+  const maybeError = error as {
+    statusCode?: number;
+    message?: string;
+    cause?: unknown;
+  };
+
+  if (maybeError.statusCode === 204) {
+    return "The model endpoint returned an empty response (HTTP 204). Please try again.";
+  }
+
+  const message = typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
+  if (message.includes("empty response body")) {
+    return "The model endpoint returned an empty response. Please try again.";
+  }
+
+  return fallback;
 }
 
 function getMessageText(message: UIMessage): string {
@@ -512,7 +546,9 @@ async function runStructuredOnlyRetrieval(
     endDate: classifiedIntent.endDate,
   });
 
-  const structuredChunks = structuredResultToChunks(structuredResult);
+  const structuredChunks = structuredResultToChunks(structuredResult, {
+    maxItems: STRUCTURED_HISTORY_MAX_ITEMS,
+  });
 
   const confidenceChunk = {
     title: "Structured confidence",
@@ -573,6 +609,7 @@ async function buildGroundedPrompt(
   const mergedContext = mergeRetrievedChunks({
     structuredChunks,
     maxChunks: RAG_MAX_CONTEXT_CHUNKS,
+    maxChunkChars: RAG_MAX_CHUNK_CHARS,
     maxTotalChars: RAG_MAX_TOTAL_CHARS,
     prioritizeStructured: true,
   });
@@ -605,7 +642,8 @@ export async function POST(request: Request) {
     const groundedPrompt = await buildGroundedPrompt(messages, body.chatContext ?? {});
 
     const result = streamText({
-      model: ragModelProvider(RAG_MODEL_NAME),
+      // Force chat completions so SDK does not call /v1/responses.
+      model: ragModelProvider.chat(RAG_MODEL_NAME),
       system: groundedPrompt.systemPrompt,
       prompt: groundedPrompt.userPrompt,
       experimental_transform: createStripThinkTransform(),
@@ -613,6 +651,10 @@ export async function POST(request: Request) {
 
     return result.toUIMessageStreamResponse({
       sendReasoning: false,
+      onError: (error) => {
+        console.error("AI chat stream failed", error);
+        return formatChatStreamError(error);
+      },
     });
   } catch (error) {
     console.error("AI chat route failed", error);

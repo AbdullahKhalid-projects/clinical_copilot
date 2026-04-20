@@ -2,7 +2,18 @@
 
 import { currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
+import { buildVisitSummaryExcerpt, extractNoteTextFromSoapNote, getSoapNoteFinalizedAt } from "@/lib/visit-summary";
 import { redirect } from "next/navigation";
+
+export type PatientVisitSummaryItem = {
+  id: string;
+  appointmentDate: Date;
+  doctorName: string;
+  reason: string;
+  noteExcerpt: string;
+  finalizedAt: string | null;
+  downloadUrl: string;
+};
 
 export async function getPatientDashboardData() {
   const user = await currentUser();
@@ -182,6 +193,86 @@ export async function getPatientReports() {
       unit: v.unit,
     })),
   }));
+}
+
+export async function getPatientVisitSummaries(): Promise<PatientVisitSummaryItem[]> {
+  const user = await currentUser();
+
+  if (!user) {
+    redirect("/");
+  }
+
+  const dbUser = await prisma.user.findUnique({
+    where: { clerkId: user.id },
+    include: {
+      patientProfile: {
+        select: {
+          id: true,
+        },
+      },
+    },
+  });
+
+  if (!dbUser?.patientProfile) {
+    return [];
+  }
+
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      patientId: dbUser.patientProfile.id,
+      status: "COMPLETED",
+    },
+    select: {
+      id: true,
+      date: true,
+      reason: true,
+      soapNote: true,
+      soapNoteUrl: true,
+      updatedAt: true,
+      doctor: {
+        select: {
+          user: {
+            select: {
+              name: true,
+            },
+          },
+          specialization: true,
+        },
+      },
+    },
+    orderBy: {
+      date: "desc",
+    },
+  });
+
+  const summaries = appointments
+    .map((appointment) => {
+      const noteText = extractNoteTextFromSoapNote(appointment.soapNote);
+      if (!noteText) {
+        return null;
+      }
+
+      const doctorName = appointment.doctor?.user?.name
+        ? `Dr. ${appointment.doctor.user.name}`
+        : appointment.doctor?.specialization
+          ? `Dr. ${appointment.doctor.specialization}`
+          : "Care Team";
+
+      return {
+        id: appointment.id,
+        appointmentDate: appointment.date,
+        doctorName,
+        reason: appointment.reason?.trim() || "Clinical follow-up",
+        noteExcerpt: buildVisitSummaryExcerpt(noteText),
+        finalizedAt: getSoapNoteFinalizedAt(appointment.soapNote) ?? appointment.updatedAt.toISOString(),
+        downloadUrl:
+          appointment.soapNoteUrl?.trim() ||
+          `/api/patient/visit-summaries/${appointment.id}/download`,
+      } satisfies PatientVisitSummaryItem;
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+
+  return summaries;
 }
 
 export async function getPatientReportById(reportId: string) {

@@ -76,7 +76,8 @@ const BASE_SYSTEM_PROMPT = [
   "Do not invent labs, diagnoses, medications, dates, or ranges.",
   "When requested data is unavailable, do not speculate about possible conditions.",
   "Keep the answer clinically useful, clear, and actionable.",
-  "When referencing evidence, cite chunk IDs in square brackets, e.g. [CTX-1].",
+  "Never reference internal context chunk IDs (for example CTX-T-3 or CTX-S-1) in the user-facing answer.",
+  "When available, reference evidence by date, metric name, and source title.",
   "",
   "=== STRUCTURED SQL MAPPING MODE ===",
   "Treat metric retrieval as a mapping from user phrasing to normalized SQL metric keys provided by retrieval evidence.",
@@ -104,9 +105,37 @@ function formatIsoDate(value: Date | null | undefined): string {
   return value.toISOString().slice(0, 10);
 }
 
+function escapeMarkdownText(value: string): string {
+  return value.replace(/[\[\]\\]/g, "\\$&");
+}
+
+function sanitizeMarkdownUrl(value: string): string {
+  return value.trim().replace(/\s/g, "%20").replace(/\)/g, "%29").replace(/\(/g, "%28");
+}
+
+function sanitizeTableCell(value: string): string {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, " ").trim();
+}
+
+function formatSourceCell(input: { documentTitle: string | null | undefined; reportUrl?: string | null }): string {
+  const title = (input.documentTitle || "Untitled Report").trim() || "Untitled Report";
+  const reportUrl = input.reportUrl?.trim();
+
+  if (!reportUrl) {
+    return sanitizeTableCell(title);
+  }
+
+  const safeTitle = escapeMarkdownText(title);
+  const safeUrl = sanitizeMarkdownUrl(reportUrl);
+  return `[${safeTitle}](${safeUrl})`;
+}
+
 function formatObservationLine(observation: MetricObservation): string {
   const unit = observation.unit ? ` ${observation.unit}` : "";
-  const source = observation.source.documentTitle || "Untitled Report";
+  const source = formatSourceCell({
+    documentTitle: observation.source.documentTitle,
+    reportUrl: observation.source.reportUrl,
+  });
   return `${formatIsoDate(observation.observedAt)} | ${observation.key}: ${observation.value}${unit} | source=${source}`;
 }
 
@@ -127,10 +156,13 @@ function formatMetricHistoryTable(observations: MetricObservation[]): string {
     const { value, unit } = splitValueAndUnit(observation);
     return [
       formatIsoDate(observation.observedAt),
-      observation.key,
-      value,
-      unit,
-      observation.source.documentTitle || "Untitled Report",
+      sanitizeTableCell(observation.key),
+      sanitizeTableCell(value),
+      sanitizeTableCell(unit),
+      formatSourceCell({
+        documentTitle: observation.source.documentTitle,
+        reportUrl: observation.source.reportUrl,
+      }),
     ];
   });
 
@@ -162,12 +194,15 @@ function formatAbnormalTable(items: AbnormalMetricObservation[]): string {
 
     return [
       formatIsoDate(observation.observedAt),
-      observation.key,
-      value,
-      unit,
-      range,
-      deviation,
-      observation.source.documentTitle || "Untitled Report",
+      sanitizeTableCell(observation.key),
+      sanitizeTableCell(value),
+      sanitizeTableCell(unit),
+      sanitizeTableCell(range),
+      sanitizeTableCell(deviation),
+      formatSourceCell({
+        documentTitle: observation.source.documentTitle,
+        reportUrl: observation.source.reportUrl,
+      }),
     ];
   });
 
@@ -181,6 +216,7 @@ function formatPanelHistoryTable(
   rows: Array<{
     observedAt: Date;
     sourceDocumentTitle: string;
+    sourceReportUrl?: string | null;
     values: Record<string, string | null>;
   }>
 ): string {
@@ -192,13 +228,42 @@ function formatPanelHistoryTable(
   const separator = header.map(() => "---");
   const body = rows.map((row) => [
     formatIsoDate(row.observedAt),
-    ...columns.map((column) => row.values[column] ?? "-"),
-    row.sourceDocumentTitle || "Untitled Report",
+    ...columns.map((column) => sanitizeTableCell(row.values[column] ?? "-")),
+    formatSourceCell({
+      documentTitle: row.sourceDocumentTitle,
+      reportUrl: row.sourceReportUrl,
+    }),
   ]);
 
   return [header, separator, ...body]
     .map((cells) => `| ${cells.join(" | ")} |`)
     .join("\n");
+}
+
+function formatLatestPanelLine(
+  columns: string[],
+  rows: Array<{
+    observedAt: Date;
+    sourceDocumentTitle: string;
+    sourceReportUrl?: string | null;
+    values: Record<string, string | null>;
+  }>
+): string {
+  if (rows.length === 0) {
+    return "No latest panel reading was found for the requested criteria.";
+  }
+
+  const latest = rows[rows.length - 1];
+  const values = columns
+    .map((column) => `${column}=${sanitizeTableCell(latest.values[column] ?? "-")}`)
+    .join(", ");
+
+  return `${formatIsoDate(latest.observedAt)} | ${values} | source=${
+    formatSourceCell({
+      documentTitle: latest.sourceDocumentTitle,
+      reportUrl: latest.sourceReportUrl,
+    })
+  }`;
 }
 
 export function structuredResultToChunks(
@@ -209,7 +274,7 @@ export function structuredResultToChunks(
     return [];
   }
 
-  const maxItems = clampPositive(options?.maxItems, 12);
+  const maxItems = clampPositive(options?.maxItems, 300);
 
   switch (result.intent) {
     case "GET_LATEST_METRIC": {
@@ -236,12 +301,36 @@ export function structuredResultToChunks(
       const selected = result.observations.slice(0, maxItems);
       const panelRows = result.panelRows?.slice(0, maxItems) ?? [];
       const hasPanel = Boolean(result.panelColumns && result.panelColumns.length > 0 && panelRows.length > 0);
+
+      const historyChunk: StructuredContextChunkInput = {
+        title: `Structured history ${result.metric}`,
+        text: hasPanel
+          ? formatPanelHistoryTable(result.panelColumns ?? [], panelRows)
+          : formatMetricHistoryTable(selected),
+        score: 1,
+      };
+
+      if (hasPanel) {
+        return [
+          historyChunk,
+          {
+            title: `Structured latest ${result.metric}`,
+            text: formatLatestPanelLine(result.panelColumns ?? [], panelRows),
+            score: 1,
+          },
+        ];
+      }
+
+      const latestObservation = result.observations[result.observations.length - 1];
+      if (!latestObservation) {
+        return [historyChunk];
+      }
+
       return [
+        historyChunk,
         {
-          title: `Structured history ${result.metric}`,
-          text: hasPanel
-            ? formatPanelHistoryTable(result.panelColumns ?? [], panelRows)
-            : formatMetricHistoryTable(selected),
+          title: `Structured latest ${result.metric}`,
+          text: formatObservationLine(latestObservation),
           score: 1,
         },
       ];
@@ -365,7 +454,7 @@ function formatContextBlock(chunks: MergedGenerationChunk[]): string {
     .map((chunk) => {
       const scoreLabel = Number.isFinite(chunk.score) ? chunk.score.toFixed(4) : "0.0000";
       return [
-        `[${chunk.chunkId}] kind=${chunk.kind} score=${scoreLabel} title=${chunk.title}`,
+        `kind=${chunk.kind} score=${scoreLabel} title=${chunk.title}`,
         chunk.text,
       ].join("\n");
     })
@@ -438,9 +527,11 @@ export function buildGenerationPrompt(
     responseStyleInstruction,
     "If structured evidence reports no matching rows for the requested metric, state that clearly, list the missing data fields, and avoid differential diagnosis speculation.",
     "When structured evidence contains clinical values over time, include a markdown table of actual values (with Date, Metric, Value, Unit, Source) before your interpretation.",
+    "For metric history requests, reproduce every structured history row provided in evidence (do not drop rows), then explicitly call out the most recent reading in a separate sentence.",
     "For panel metrics (for example DLC), preserve and present the full table rows from evidence; do not collapse to prose-only summaries.",
     "Separate uncertain conclusions from supported findings.",
-    "Reference evidence chunk IDs for factual claims.",
+    "Do not mention internal chunk identifiers (for example CTX-T-3 or CTX-S-2) in the final response.",
+    "When Source values include markdown links, preserve those links in any output table so users can open the underlying report.",
     "If there is a contradiction across chunks, call it out explicitly.",
   ]
     .filter((line) => line.length > 0)

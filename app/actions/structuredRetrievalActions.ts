@@ -37,6 +37,7 @@ export interface MetricObservation {
   source: {
     reportId: string;
     reportDate: Date | null;
+    reportUrl: string | null;
     hospitalName: string | null;
     documentId: string;
     documentTitle: string;
@@ -69,6 +70,7 @@ export interface StructuredMetricHistoryResult {
   panelRows?: Array<{
     observedAt: Date;
     sourceDocumentTitle: string;
+    sourceReportUrl: string | null;
     sourceHospitalName: string | null;
     values: Record<string, string | null>;
   }>;
@@ -514,6 +516,7 @@ async function fetchDlcPanelRowsForUser(
         select: {
           id: true,
           reportDate: true,
+          reportURL: true,
           hospitalName: true,
           document: {
             select: {
@@ -543,6 +546,7 @@ async function fetchDlcPanelRowsForUser(
     {
       observedAt: Date;
       sourceDocumentTitle: string;
+      sourceReportUrl: string | null;
       sourceHospitalName: string | null;
       values: Record<string, string | null>;
     }
@@ -567,6 +571,7 @@ async function fetchDlcPanelRowsForUser(
       byReport.set(reportId, {
         observedAt,
         sourceDocumentTitle: row.report.document.title,
+        sourceReportUrl: row.report.reportURL ?? null,
         sourceHospitalName: row.report.hospitalName,
         values: Object.fromEntries(DLC_PANEL_COLUMNS.map((label) => [label, null])),
       });
@@ -753,6 +758,7 @@ function toObservation(row: {
   report: {
     id: string;
     reportDate: Date | null;
+    reportURL: string | null;
     hospitalName: string | null;
     document: {
       id: string;
@@ -774,6 +780,7 @@ function toObservation(row: {
     source: {
       reportId: row.report.id,
       reportDate: row.report.reportDate,
+      reportUrl: row.report.reportURL,
       hospitalName: row.report.hospitalName,
       documentId: row.report.document.id,
       documentTitle: row.report.document.title,
@@ -807,6 +814,7 @@ async function fetchObservations(
         select: {
           id: true,
           reportDate: true,
+          reportURL: true,
           hospitalName: true,
           document: {
             select: {
@@ -1084,6 +1092,7 @@ async function fetchObservationsForPatient(
         select: {
           id: true,
           reportDate: true,
+          reportURL: true,
           hospitalName: true,
           document: {
             select: {

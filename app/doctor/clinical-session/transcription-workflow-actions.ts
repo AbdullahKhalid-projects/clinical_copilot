@@ -27,6 +27,15 @@ function formatTranscriptionError(error: unknown, endpointUrl: string) {
   return error.message || fallback;
 }
 
+function isConnectivityError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const causeCode = (error as any)?.cause?.code;
+  return causeCode === "ECONNREFUSED" || /fetch failed/i.test(error.message);
+}
+
 type PersistTranscriptResult = {
   success: boolean;
   error?: string;
@@ -160,7 +169,15 @@ export async function confirmAndSaveAppointmentTranscription(appointmentId: stri
     const transcriptionBackendUrl = resolveTranscriptionBackendUrl();
     const endpointUrl = `${transcriptionBackendUrl}/api/transcribe-upload`;
     const message = formatTranscriptionError(error, endpointUrl);
-    console.error("confirmAndSaveAppointmentTranscription failed", error);
+
+    if (isConnectivityError(error)) {
+      console.warn("confirmAndSaveAppointmentTranscription connectivity issue", {
+        endpointUrl,
+        message,
+      });
+    } else {
+      console.error("confirmAndSaveAppointmentTranscription failed", error);
+    }
 
     await prisma.appointment.update({
       where: { id: appointment.id },
