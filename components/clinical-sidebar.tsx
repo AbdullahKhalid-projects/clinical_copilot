@@ -110,7 +110,7 @@ export function ClinicalSidebar() {
   };
 
   return (
-    <div className="w-[17rem] h-svh sticky top-0 border-r border-sidebar-border/70 bg-background text-sidebar-foreground flex flex-col transition-all duration-300 ease-in-out" data-sidebar="sub-sidebar">
+    <div className="w-[17rem] h-full border-r border-sidebar-border/70 bg-background text-sidebar-foreground flex flex-col transition-all duration-300 ease-in-out" data-sidebar="sub-sidebar">
       {/* Header */}
       <div className="px-3 py-3 flex flex-col gap-2 border-b border-sidebar-border/70 bg-background/95 backdrop-blur-sm z-20">
         {/* Top actions */}

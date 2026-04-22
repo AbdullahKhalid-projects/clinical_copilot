@@ -409,7 +409,7 @@ export function Sidebar({ role }: SidebarProps) {
       </ShadcnSidebar>
       {mounted && (
         <div
-          className={`overflow-hidden transition-all duration-300 ease-out ${isClinicalSidebarOpen
+          className={`sticky top-0 self-start h-svh overflow-hidden transition-all duration-300 ease-out ${isClinicalSidebarOpen
               ? "w-[17rem] translate-x-0 opacity-100"
               : "w-0 translate-x-2 opacity-0 pointer-events-none"
             }`}

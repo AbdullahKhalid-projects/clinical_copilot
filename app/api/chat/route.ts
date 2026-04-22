@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { streamText, type UIMessage } from "ai";
+import { stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { NextResponse } from "next/server";
 import { buildGenerationPrompt, mergeRetrievedChunks, structuredResultToChunks } from "@/retrieval_actions/generation";
 import {
@@ -13,18 +13,40 @@ import {
 import { prisma } from "@/lib/prisma";
 import { resolveMetricQuery } from "@/retrieval_actions/metricQueryResolver";
 import { CANONICAL_METRICS } from "@/retrieval_actions/metricAliasDictionary";
+import { z } from "zod";
 
 const SYSTEM_PROMPT =
   "You are Shifa, a clinical copilot assistant. Give concise, clinically useful responses, acknowledge uncertainty, and suggest next best questions when appropriate.";
 
 const RAG_MODEL_BASE_URL =
-  "https://bsparx128--example-qwen3-6-35b-a3b-awq-inference-vllmser-088df8.modal.run/v1";
+  "https://muddasirjaved666--example-qwen3-6-35b-a3b-awq-inference--b0eb28.modal.run/v1";
 const RAG_MODEL_NAME = "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit";
 const RAG_MODEL_API_KEY = process.env.RAG_MODEL_API_KEY ?? "dummy-key";
+const RAG_EMPTY_204_RETRY_COUNT = Math.max(
+  0,
+  Number.parseInt(process.env.RAG_EMPTY_204_RETRY_COUNT ?? "1", 10) || 1
+);
+const RAG_5XX_RETRY_COUNT = Math.max(
+  0,
+  Number.parseInt(process.env.RAG_5XX_RETRY_COUNT ?? "2", 10) || 2
+);
+const RAG_RETRY_BASE_DELAY_MS = Math.max(
+  0,
+  Number.parseInt(process.env.RAG_RETRY_BASE_DELAY_MS ?? "250", 10) || 250
+);
+const STRUCTURED_TOOL_CALLING_ENABLED =
+  (process.env.STRUCTURED_TOOL_CALLING_ENABLED ?? "false").toLowerCase() === "true";
+const STRUCTURED_TOOL_DEBUG_LOGS_ENABLED =
+  (process.env.STRUCTURED_TOOL_DEBUG_LOGS_ENABLED ?? "true").toLowerCase() === "true";
+const CHAT_DEBUG_LOGS_ENABLED =
+  (process.env.CHAT_DEBUG_LOGS_ENABLED ?? "true").toLowerCase() === "true";
 const RAG_MAX_CONTEXT_CHUNKS = 8;
 const RAG_MAX_CHUNK_CHARS = 14000;
 const RAG_MAX_TOTAL_CHARS = 28000;
 const STRUCTURED_HISTORY_MAX_ITEMS = 300;
+const TOOL_RESULT_MAX_CHUNKS = 4;
+const TOOL_RESULT_MAX_CHUNK_CHARS = 3200;
+const TOOL_RESULT_MAX_TOTAL_CHARS = 9000;
 const CONVERSATION_CONTEXT_MAX_MESSAGES = 6;
 const THINK_OPEN_TAG = "<think>";
 const THINK_CLOSE_TAG = "</think>";
@@ -33,6 +55,96 @@ const THINK_CLOSE_TAG = "</think>";
 const ragModelProvider = createOpenAI({
   baseURL: RAG_MODEL_BASE_URL,
   apiKey: RAG_MODEL_API_KEY,
+  fetch: async (input, init) => {
+    const requestUrl =
+      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+    const withPreserveThinking = (requestInit: RequestInit | undefined): RequestInit | undefined => {
+      if (!requestUrl.includes("/chat/completions")) {
+        return requestInit;
+      }
+
+      if (!requestInit?.body || typeof requestInit.body !== "string") {
+        return requestInit;
+      }
+
+      try {
+        const parsed = JSON.parse(requestInit.body) as Record<string, unknown>;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          return requestInit;
+        }
+
+        const existingKwargsRaw = parsed.chat_template_kwargs;
+        const existingKwargs =
+          existingKwargsRaw && typeof existingKwargsRaw === "object" && !Array.isArray(existingKwargsRaw)
+            ? (existingKwargsRaw as Record<string, unknown>)
+            : {};
+
+        const nextBody = JSON.stringify({
+          ...parsed,
+          chat_template_kwargs: {
+            ...existingKwargs,
+            preserve_thinking: true,
+          },
+        });
+
+        const nextHeaders = new Headers(requestInit.headers);
+        nextHeaders.delete("content-length");
+
+        return {
+          ...requestInit,
+          headers: nextHeaders,
+          body: nextBody,
+        };
+      } catch {
+        return requestInit;
+      }
+    };
+
+    const attemptFetch = async () => fetch(input, withPreserveThinking(init));
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const shouldRetry5xx = (status: number) => [500, 502, 503, 504].includes(status);
+
+    let response = await attemptFetch();
+    let emptyBodyAttempts = 0;
+    let serverErrorAttempts = 0;
+    let totalAttempts = 0;
+
+    while (true) {
+      totalAttempts += 1;
+
+      if (response.status === 204 && emptyBodyAttempts < RAG_EMPTY_204_RETRY_COUNT) {
+        emptyBodyAttempts += 1;
+        console.warn(
+          `Modal endpoint returned HTTP 204 (empty body). Retrying ${emptyBodyAttempts}/${RAG_EMPTY_204_RETRY_COUNT}.`
+        );
+        await sleep(RAG_RETRY_BASE_DELAY_MS * emptyBodyAttempts);
+        response = await attemptFetch();
+        continue;
+      }
+
+      if (shouldRetry5xx(response.status) && serverErrorAttempts < RAG_5XX_RETRY_COUNT) {
+        serverErrorAttempts += 1;
+        console.warn(
+          `Modal endpoint returned HTTP ${response.status}. Retrying ${serverErrorAttempts}/${RAG_5XX_RETRY_COUNT}.`
+        );
+        await sleep(RAG_RETRY_BASE_DELAY_MS * serverErrorAttempts);
+        response = await attemptFetch();
+        continue;
+      }
+
+      if (CHAT_DEBUG_LOGS_ENABLED && totalAttempts > 1) {
+        console.info("Modal upstream retry summary", {
+          finalStatus: response.status,
+          totalAttempts,
+          emptyBodyAttempts,
+          serverErrorAttempts,
+        });
+      }
+
+      return response;
+    }
+  },
 });
 
 function longestTagPrefixAtEnd(text: string, tag: string): number {
@@ -181,6 +293,10 @@ function formatChatStreamError(error: unknown): string {
     return "The model endpoint returned an empty response (HTTP 204). Please try again.";
   }
 
+  if (maybeError.statusCode === 500) {
+    return "The model endpoint returned an internal error (HTTP 500). Please retry in a few seconds.";
+  }
+
   const message = typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
   if (message.includes("empty response body")) {
     return "The model endpoint returned an empty response. Please try again.";
@@ -237,6 +353,131 @@ type ChatContextPayload = {
   patientMetricCatalog?: string[] | null;
   includePatientDocuments?: boolean;
 };
+
+const STRUCTURED_TOOL_INTENTS = [
+  "GET_LATEST_METRIC",
+  "GET_METRIC_HISTORY",
+  "GET_METRIC_TREND",
+  "GET_ABNORMAL_READINGS",
+] as const;
+
+type StructuredToolIntent = (typeof STRUCTURED_TOOL_INTENTS)[number];
+
+type StructuredToolInput = {
+  intent: StructuredToolIntent;
+  metricQuery?: string;
+  timeWindowDays?: number;
+  startDate?: string;
+  endDate?: string;
+};
+
+type StructuredToolResult = {
+  ok: boolean;
+  intent: StructuredToolIntent;
+  requestedMetric: string | null;
+  resolvedMetric: string | null;
+  mapping: {
+    strategy: "exact" | "contains" | "fuzzy" | "none";
+    score: number;
+  } | null;
+  confidence?: {
+    level: string;
+    score: number;
+    rationale: string[];
+  };
+  structuredChunks: Array<{ title: string; text: string; score?: number }>;
+  error?: string;
+};
+
+type LatestReportsToolResult = {
+  ok: boolean;
+  maxReports: number;
+  reports: Array<{
+    id: string;
+    title: string;
+    reportDate: string | null;
+    createdAt: string;
+    hospitalName: string | null;
+    reportLink: string | null;
+  }>;
+  latestReportsTable: string;
+  error?: string;
+};
+
+function formatStructuredToolOutput(result: StructuredToolResult): string {
+  if (!result.ok) {
+    return `Tool execution failed: ${result.error ?? "Unknown structured retrieval error."}`;
+  }
+
+  const chunksText = result.structuredChunks
+    .map((chunk) => `### ${chunk.title}\n${chunk.text}`)
+    .join("\n\n");
+
+  return `Tool executed successfully for metric: ${result.resolvedMetric ?? "unknown"}\n\nResults:\n${chunksText}`;
+}
+
+function formatLatestReportsToolOutput(result: LatestReportsToolResult): string {
+  if (!result.ok) {
+    return `Failed to get reports: ${result.error ?? "Unknown latest report retrieval error."}`;
+  }
+
+  return `Successfully retrieved latest reports.\n\n${result.latestReportsTable}`;
+}
+
+function trimToolResultText(value: string, maxChars: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}...`;
+}
+
+function boundToolResultChunks(
+  chunks: Array<{ title: string; text: string; score?: number }>
+): Array<{ title: string; text: string; score?: number }> {
+  const limitedByCount = chunks.slice(0, TOOL_RESULT_MAX_CHUNKS);
+  let totalChars = 0;
+  const bounded: Array<{ title: string; text: string; score?: number }> = [];
+
+  for (const chunk of limitedByCount) {
+    const boundedText = trimToolResultText(chunk.text, TOOL_RESULT_MAX_CHUNK_CHARS);
+    const projected = totalChars + chunk.title.length + boundedText.length;
+
+    if (projected > TOOL_RESULT_MAX_TOTAL_CHARS) {
+      break;
+    }
+
+    bounded.push({
+      title: chunk.title,
+      text: boundedText,
+      score: chunk.score,
+    });
+    totalChars = projected;
+  }
+
+  if (bounded.length === 0 && chunks.length > 0) {
+    const first = chunks[0];
+    return [
+      {
+        title: first.title,
+        text: trimToolResultText(first.text, Math.min(TOOL_RESULT_MAX_CHUNK_CHARS, 1200)),
+        score: first.score,
+      },
+    ];
+  }
+
+  if (bounded.length < chunks.length) {
+    bounded.push({
+      title: "Structured tool output note",
+      text:
+        "Tool output was truncated for model stability. Ask follow-up requests for additional rows or narrower time windows.",
+      score: 1,
+    });
+  }
+
+  return bounded;
+}
 
 function normalizeMetricKey(value: string): string {
   return value
@@ -567,12 +808,246 @@ async function runStructuredOnlyRetrieval(
   return {
     classifiedIntent,
     structuredResult,
-    structuredChunks: [
+    structuredChunks: boundToolResultChunks([
       confidenceChunk,
       ...(mappingChunk ? [mappingChunk] : []),
       ...structuredChunks,
-    ],
+    ]),
   };
+}
+
+async function executeStructuredRetrievalTool(
+  input: StructuredToolInput,
+  context: {
+    patientUserId: string | null;
+    patientMetricCatalog: string[];
+  }
+): Promise<StructuredToolResult> {
+  if (!context.patientUserId) {
+    return {
+      ok: false,
+      intent: input.intent,
+      requestedMetric: input.metricQuery?.trim() || null,
+      resolvedMetric: null,
+      mapping: null,
+      structuredChunks: [
+        {
+          title: "Missing patient context",
+          text:
+            "No patient user id was available in chat context, so structured retrieval could not be executed.",
+          score: 1,
+        },
+      ],
+      error: "Missing patient user id.",
+    };
+  }
+
+  const needsMetric = input.intent !== "GET_ABNORMAL_READINGS";
+  const requestedMetric = input.metricQuery?.trim() || null;
+
+  if (needsMetric && !requestedMetric) {
+    return {
+      ok: false,
+      intent: input.intent,
+      requestedMetric: null,
+      resolvedMetric: null,
+      mapping: null,
+      structuredChunks: [
+        {
+          title: "Missing metric query",
+          text: `Intent ${input.intent} requires a metricQuery value.`,
+          score: 1,
+        },
+      ],
+      error: "metricQuery is required.",
+    };
+  }
+
+  const mapping = requestedMetric
+    ? resolveMetricAgainstCatalog(requestedMetric, context.patientMetricCatalog)
+    : { matchedMetric: null, strategy: "none" as const, score: 0 };
+
+  if (
+    requestedMetric &&
+    context.patientMetricCatalog.length > 0 &&
+    !mapping.matchedMetric &&
+    needsMetric
+  ) {
+    const preview = context.patientMetricCatalog.slice(0, 40).join(", ");
+    return {
+      ok: false,
+      intent: input.intent,
+      requestedMetric,
+      resolvedMetric: null,
+      mapping: {
+        strategy: mapping.strategy,
+        score: mapping.score,
+      },
+      structuredChunks: [
+        {
+          title: "Structured metric mapping",
+          text: `No patient metric in catalog matched query='${requestedMetric}'.`,
+          score: 0.25,
+        },
+        {
+          title: "Patient normalized metric catalog",
+          text: `catalogSize=${context.patientMetricCatalog.length} available=${preview || "none"}`,
+          score: 0.35,
+        },
+      ],
+      error: "No matching metric in patient catalog.",
+    };
+  }
+
+  const effectiveMetricQuery = mapping.matchedMetric ?? requestedMetric;
+
+  try {
+    const structuredResult = await runStructuredRetrievalForPatient(context.patientUserId, {
+      intent: input.intent,
+      metricQuery: effectiveMetricQuery ?? undefined,
+      timeWindowDays: input.timeWindowDays,
+      startDate: input.startDate,
+      endDate: input.endDate,
+    });
+
+    const structuredChunks = structuredResultToChunks(structuredResult, {
+      maxItems: STRUCTURED_HISTORY_MAX_ITEMS,
+    });
+
+    const confidenceChunk = {
+      title: "Structured confidence",
+      text: `level=${structuredResult.confidence.level} score=${structuredResult.confidence.score.toFixed(2)} rationale=${structuredResult.confidence.rationale.join(" | ")}`,
+      score: structuredResult.confidence.score,
+    };
+
+    const mappingChunk = requestedMetric
+      ? {
+          title: "Structured metric mapping",
+          text: `query='${requestedMetric}' mapped='${effectiveMetricQuery ?? "none"}' strategy=${mapping.strategy} score=${mapping.score.toFixed(3)} catalogSize=${context.patientMetricCatalog.length}`,
+          score: 0.95,
+        }
+      : null;
+
+    return {
+      ok: true,
+      intent: input.intent,
+      requestedMetric,
+      resolvedMetric: effectiveMetricQuery ?? null,
+      mapping: requestedMetric
+        ? {
+            strategy: mapping.strategy,
+            score: mapping.score,
+          }
+        : null,
+      confidence: {
+        level: structuredResult.confidence.level,
+        score: structuredResult.confidence.score,
+        rationale: structuredResult.confidence.rationale,
+      },
+      structuredChunks: boundToolResultChunks([
+        confidenceChunk,
+        ...(mappingChunk ? [mappingChunk] : []),
+        ...structuredChunks,
+      ]),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown structured retrieval error.";
+    return {
+      ok: false,
+      intent: input.intent,
+      requestedMetric,
+      resolvedMetric: effectiveMetricQuery ?? null,
+      mapping: requestedMetric
+        ? {
+            strategy: mapping.strategy,
+            score: mapping.score,
+          }
+        : null,
+      structuredChunks: [
+        {
+          title: "Structured retrieval error",
+          text: "Structured retrieval execution failed for this request. Try narrowing the metric or time window and retry.",
+          score: 1,
+        },
+      ],
+      error: message,
+    };
+  }
+}
+
+async function executeLatestReportsTool(context: {
+  patientUserId: string | null;
+}): Promise<LatestReportsToolResult> {
+  const maxReports = 3;
+
+  if (!context.patientUserId) {
+    return {
+      ok: false,
+      maxReports,
+      reports: [],
+      latestReportsTable: "No patient user id was available in chat context.",
+      error: "Missing patient user id.",
+    };
+  }
+
+  try {
+    const reports = await prisma.medicalReport.findMany({
+      where: {
+        userId: context.patientUserId,
+      },
+      include: {
+        document: {
+          select: {
+            title: true,
+          },
+        },
+      },
+      orderBy: [
+        { reportDate: "desc" },
+        { createdAt: "desc" },
+      ],
+      take: maxReports,
+    });
+
+    const normalizedReports = reports.map((report) => {
+      const reportLink = report.reportURL?.trim() ? report.reportURL.trim() : null;
+      return {
+        id: report.id,
+        title: report.document.title,
+        reportDate: report.reportDate ? report.reportDate.toISOString().slice(0, 10) : null,
+        createdAt: report.createdAt.toISOString(),
+        hospitalName: report.hospitalName,
+        reportLink,
+      };
+    });
+
+    const latestReportsTable = normalizedReports.length
+      ? [
+          "| Date | Title | Hospital | Link |",
+          "| --- | --- | --- | --- |",
+          ...normalizedReports.map((item) => {
+            const linkCell = item.reportLink ? `[Open report](${item.reportLink})` : "No link";
+            return `| ${item.reportDate ?? "n/a"} | ${item.title} | ${item.hospitalName ?? "n/a"} | ${linkCell} |`;
+          }),
+        ].join("\n")
+      : "No reports found for this patient.";
+
+    return {
+      ok: true,
+      maxReports,
+      reports: normalizedReports,
+      latestReportsTable,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown report retrieval error.";
+    return {
+      ok: false,
+      maxReports,
+      reports: [],
+      latestReportsTable: "Latest report retrieval failed.",
+      error: message,
+    };
+  }
 }
 
 async function buildGroundedPrompt(
@@ -632,6 +1107,9 @@ async function buildGroundedPrompt(
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const requestId = `chat_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const startedAt = Date.now();
+
   try {
     const body = (await request.json().catch(() => ({}))) as {
       messages?: UIMessage[];
@@ -639,25 +1117,233 @@ export async function POST(request: Request) {
     };
 
     const messages = Array.isArray(body.messages) ? body.messages : [];
-    const groundedPrompt = await buildGroundedPrompt(messages, body.chatContext ?? {});
+    const chatContext = body.chatContext ?? {};
+    const latestUserQuery = getLatestUserQuery(messages);
 
-    const result = streamText({
+    if (CHAT_DEBUG_LOGS_ENABLED) {
+      console.info("Chat request start", {
+        requestId,
+        hasMessages: messages.length > 0,
+        hasLatestUserQuery: latestUserQuery.length > 0,
+      });
+    }
+
+    if (!latestUserQuery) {
+      const greetingResult = streamText({
+        model: ragModelProvider.chat(RAG_MODEL_NAME),
+        system: SYSTEM_PROMPT,
+        prompt: "Give a brief clinical greeting and ask one focused follow-up question.",
+        experimental_transform: createStripThinkTransform(),
+      });
+
+      return greetingResult.toUIMessageStreamResponse({
+        sendReasoning: false,
+        onError: (error) => {
+          console.error("AI chat stream failed", { requestId, mode: "greeting", error });
+          return formatChatStreamError(error);
+        },
+      });
+    }
+
+    const patientUserId = await resolvePatientUserId(chatContext);
+    const patientMetricCatalog = patientUserId
+      ? await getPatientMetricCatalog(patientUserId, chatContext.patientMetricCatalog)
+      : [];
+
+    // Keep the existing non-tool path available as fallback when patient context is missing.
+    if (!patientUserId) {
+      const groundedPrompt = await buildGroundedPrompt(messages, chatContext);
+
+      const fallbackResult = streamText({
+        model: ragModelProvider.chat(RAG_MODEL_NAME),
+        system: groundedPrompt.systemPrompt,
+        prompt: groundedPrompt.userPrompt,
+        experimental_transform: createStripThinkTransform(),
+      });
+
+      return fallbackResult.toUIMessageStreamResponse({
+        sendReasoning: false,
+        onError: (error) => {
+          console.error("AI chat stream failed", { requestId, mode: "fallback-no-patient", error });
+          return formatChatStreamError(error);
+        },
+      });
+    }
+
+    // Explicitly gate tool-calling because not all OpenAI-compatible endpoints support tool payloads.
+    if (!STRUCTURED_TOOL_CALLING_ENABLED) {
+      const groundedPrompt = await buildGroundedPrompt(messages, chatContext);
+
+      const fallbackResult = streamText({
+        model: ragModelProvider.chat(RAG_MODEL_NAME),
+        system: groundedPrompt.systemPrompt,
+        prompt: groundedPrompt.userPrompt,
+        experimental_transform: createStripThinkTransform(),
+      });
+
+      return fallbackResult.toUIMessageStreamResponse({
+        sendReasoning: false,
+        onError: (error) => {
+          console.error("AI chat stream failed", { requestId, mode: "fallback-tooling-disabled", error });
+          return formatChatStreamError(error);
+        },
+      });
+    }
+
+    const conversationContext = getConversationContext(messages);
+
+    const toolResult = streamText({
       // Force chat completions so SDK does not call /v1/responses.
       model: ragModelProvider.chat(RAG_MODEL_NAME),
-      system: groundedPrompt.systemPrompt,
-      prompt: groundedPrompt.userPrompt,
+      system: [
+        SYSTEM_PROMPT,
+        "You can use retrieval tools to answer patient metric questions.",
+        "For direct latest-value requests, prefer the structuredLatestMetric tool.",
+        "For history, trend, and abnormal requests, use structuredRetrieval.",
+        "For recent report summary requests, use getLatestReports.",
+        "If a tool returns ok=false, explain the issue and ask a concise follow-up clarifying question.",
+        "For tool-provided history tables, preserve all rows in markdown table form when possible.",
+      ].join("\n"),
+      prompt: [
+        "Clinical question:",
+        latestUserQuery,
+        conversationContext ? `Recent chat:\n${conversationContext}` : "",
+      ]
+        .filter((line) => line.length > 0)
+        .join("\n\n"),
+      tools: {
+        structuredLatestMetric: tool({
+          description:
+            "Get the latest value for a specific patient metric using structured retrieval.",
+          inputSchema: z.object({
+            metricQuery: z
+              .string()
+              .min(1)
+              .describe("Normalized or natural-language metric name, for example hemoglobin."),
+            timeWindowDays: z
+              .number()
+              .int()
+              .positive()
+              .optional()
+              .describe("Optional lookback window in days."),
+            startDate: z
+              .string()
+              .optional()
+              .describe("Optional ISO start date (YYYY-MM-DD)."),
+            endDate: z
+              .string()
+              .optional()
+              .describe("Optional ISO end date (YYYY-MM-DD)."),
+          }),
+          execute: async ({ metricQuery, timeWindowDays, startDate, endDate }) =>
+            formatStructuredToolOutput(
+              await executeStructuredRetrievalTool(
+                {
+                  intent: "GET_LATEST_METRIC",
+                  metricQuery,
+                  timeWindowDays,
+                  startDate,
+                  endDate,
+                },
+                {
+                  patientUserId,
+                  patientMetricCatalog,
+                }
+              )
+            ),
+        }),
+        structuredRetrieval: tool({
+          description:
+            "Run patient-scoped structured retrieval for metric history, trend, abnormalities, or latest value.",
+          inputSchema: z.object({
+            intent: z
+              .enum(STRUCTURED_TOOL_INTENTS)
+              .describe("Structured retrieval intent to execute."),
+            metricQuery: z
+              .string()
+              .optional()
+              .describe("Metric name; required for latest/history/trend and optional for abnormal readings."),
+            timeWindowDays: z
+              .number()
+              .int()
+              .positive()
+              .optional()
+              .describe("Optional lookback window in days."),
+            startDate: z
+              .string()
+              .optional()
+              .describe("Optional ISO start date (YYYY-MM-DD)."),
+            endDate: z
+              .string()
+              .optional()
+              .describe("Optional ISO end date (YYYY-MM-DD)."),
+          }),
+          execute: async ({ intent, metricQuery, timeWindowDays, startDate, endDate }) =>
+            formatStructuredToolOutput(
+              await executeStructuredRetrievalTool(
+                {
+                  intent,
+                  metricQuery,
+                  timeWindowDays,
+                  startDate,
+                  endDate,
+                },
+                {
+                  patientUserId,
+                  patientMetricCatalog,
+                }
+              )
+            ),
+        }),
+        getLatestReports: tool({
+          description:
+            "Get the 3 latest medical reports for the patient. Always returns at most 3 reports and includes reportLink when present.",
+          inputSchema: z.object({}),
+          execute: async () =>
+            formatLatestReportsToolOutput(
+              await executeLatestReportsTool({
+                patientUserId,
+              })
+            ),
+        }),
+      },
+      stopWhen: stepCountIs(5),
+      providerOptions: {
+        openai: {
+          parallelToolCalls: false,
+        },
+      },
+      onStepFinish: ({ toolCalls, toolResults, finishReason }) => {
+        if (!STRUCTURED_TOOL_DEBUG_LOGS_ENABLED) {
+          return;
+        }
+
+        console.log("Structured tool step", {
+          requestId,
+          finishReason,
+          toolCalls: toolCalls.map((item) => item.toolName),
+          toolResults: toolResults.map((item) => ({
+            toolName: item.toolName,
+            hasOutput: Boolean(item.output),
+          })),
+        });
+      },
       experimental_transform: createStripThinkTransform(),
     });
 
-    return result.toUIMessageStreamResponse({
+    return toolResult.toUIMessageStreamResponse({
       sendReasoning: false,
       onError: (error) => {
-        console.error("AI chat stream failed", error);
+        console.error("AI chat stream failed", { requestId, mode: "tool-calling", error });
         return formatChatStreamError(error);
       },
     });
   } catch (error) {
-    console.error("AI chat route failed", error);
+    console.error("AI chat route failed", {
+      requestId,
+      elapsedMs: Date.now() - startedAt,
+      error,
+    });
     return NextResponse.json(
       { error: "Failed to generate response." },
       { status: 500 },
