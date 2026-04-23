@@ -27,7 +27,7 @@ import {
   validateAndNormalizeLlmPayload,
 } from "../template-engine";
 import { HEADER_FOOTER_STYLES } from "../header-footer-styles";
-import { NoteDocument } from "./pdf-note-preview";
+import { NoteDocument } from "@/lib/note-document-pdf";
 import { ConfigPanel } from "./editor-panels/config-panel";
 import { PreviewPanel } from "./editor-panels/preview-panel";
 import { PromptPanel } from "./editor-panels/prompt-panel";

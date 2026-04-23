@@ -1,5 +1,5 @@
 import React from "react";
-import { Document, Page, StyleSheet, Text, View, pdf } from "@react-pdf/renderer";
+import { Document, Page, StyleSheet, Text, View, renderToStream } from "@react-pdf/renderer";
 
 export type VisitSummaryPdfPayload = {
   patientName: string;
@@ -103,6 +103,11 @@ export function buildVisitSummaryFilename(patientName: string, visitDateLabel: s
 
 export async function renderVisitSummaryPdfBuffer(payload: VisitSummaryPdfPayload): Promise<Buffer> {
   const doc = <VisitSummaryPdfDocument {...payload} />;
-  const raw = await pdf(doc).toBuffer();
-  return Buffer.from(raw);
+  const stream = await renderToStream(doc);
+  return new Promise((resolve, reject) => {
+    const buffers: Buffer[] = [];
+    stream.on("data", (data: Buffer) => buffers.push(data));
+    stream.on("end", () => resolve(Buffer.concat(buffers)));
+    stream.on("error", reject);
+  });
 }

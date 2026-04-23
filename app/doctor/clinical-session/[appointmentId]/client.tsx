@@ -3,27 +3,27 @@
 import * as React from "react";
 import { format, isValid } from "date-fns";
 import { useRouter, useSearchParams } from "next/navigation";
-import { PDFDownloadLink } from "@react-pdf/renderer";
-import { 
+import { PDFDownloadLink, pdf } from "@react-pdf/renderer";
+import {
     AudioLines,
-  ChevronDown, 
+    ChevronDown,
     ChevronLeft,
     ChevronRight,
-  Mic, 
-  PenLine, 
-        FileCode2,
-        Download,
-        Save,
-    Trash, 
-  History,
-  Mic2,
-  Calendar,
-  Pause,
-  StopCircle,
-  Play,
-  FileText,
-  Stethoscope,
-  MessageSquare,
+    Mic,
+    PenLine,
+    FileCode2,
+    Download,
+    Save,
+    Trash,
+    History,
+    Mic2,
+    Calendar,
+    Pause,
+    StopCircle,
+    Play,
+    FileText,
+    Stethoscope,
+    MessageSquare,
     Loader2,
     Clock3,
     CheckCircle2,
@@ -61,27 +61,27 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { NoteDocument } from "@/app/doctor/templates/components/pdf-note-preview";
+import { NoteDocument } from "@/lib/note-document-pdf";
 import type { SoapTemplate } from "@/app/doctor/templates/types";
 import { renderNotePreviewFromObject } from "@/app/doctor/templates/template-engine";
 
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
     DropdownMenuRadioGroup,
     DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator
+    DropdownMenuTrigger,
+    DropdownMenuLabel,
+    DropdownMenuSeparator
 } from "@/components/ui/dropdown-menu";
 import {
-  Dialog,
-  DialogContent,
+    Dialog,
+    DialogContent,
     DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -115,7 +115,7 @@ import {
 // (Removed as we are using the one in AudioRecorderWithVisualizer component)
 
 interface ClinicalSessionClientProps {
-  appointment: any; // We'll type this properly later or infer from usage
+    appointment: any; // We'll type this properly later or infer from usage
 }
 
 const CLINICAL_CHAT_PANE_EVENT = "clinical:chat-pane-request";
@@ -275,11 +275,11 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         setCurrentAppointment(appointment);
     }, [appointment]);
 
-  // Mock data for UI placeholders
+    // Mock data for UI placeholders
     const patientName = currentAppointment.patient?.user?.name || "Link Patient";
-        const parsedAppointmentDate = currentAppointment?.date ? new Date(currentAppointment.date) : null;
-        const appointmentDate = parsedAppointmentDate && isValid(parsedAppointmentDate) ? parsedAppointmentDate : null;
-  const patientInitials = patientName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+    const parsedAppointmentDate = currentAppointment?.date ? new Date(currentAppointment.date) : null;
+    const appointmentDate = parsedAppointmentDate && isValid(parsedAppointmentDate) ? parsedAppointmentDate : null;
+    const patientInitials = patientName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
     const patientImage = currentAppointment.patientImageUrl;
     const reason = currentAppointment.reason || "General Consultation";
     const hasLinkedPatient = Boolean(currentAppointment.patient?.id);
@@ -303,33 +303,33 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const statusBadgeClass = statusBadgeClassMap[currentAppointment.status] || "border-border bg-muted/70 text-foreground";
     const pythonBackendUrl = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL?.trim() || "http://localhost:8000";
 
-        const {
-                connect,
-                disconnect,
-                connected,
-                sessionId,
-                transcript,
-                draftTranscript,
-                speakerRoles,
-                sendAudioChunk,
-                stopSession,
-        } = useClinicalWebSocket(pythonBackendUrl);
+    const {
+        connect,
+        disconnect,
+        connected,
+        sessionId,
+        transcript,
+        draftTranscript,
+        speakerRoles,
+        sendAudioChunk,
+        stopSession,
+    } = useClinicalWebSocket(pythonBackendUrl);
 
-  // State for recording and devices
-  const [isUploading, setIsUploading] = React.useState(false);
-  const [uploadProgress, setUploadProgress] = React.useState(0);
-  const [isProcessing, setIsProcessing] = React.useState(false);
-        const [microphoneDevices, setMicrophoneDevices] = React.useState<MediaDeviceInfo[]>([]);
-        const [selectedMicrophoneId, setSelectedMicrophoneId] = React.useState<string>("default");
-        const [isLoadingMicrophones, setIsLoadingMicrophones] = React.useState(false);
+    // State for recording and devices
+    const [isUploading, setIsUploading] = React.useState(false);
+    const [uploadProgress, setUploadProgress] = React.useState(0);
+    const [isProcessing, setIsProcessing] = React.useState(false);
+    const [microphoneDevices, setMicrophoneDevices] = React.useState<MediaDeviceInfo[]>([]);
+    const [selectedMicrophoneId, setSelectedMicrophoneId] = React.useState<string>("default");
+    const [isLoadingMicrophones, setIsLoadingMicrophones] = React.useState(false);
     const [recordingUrl, setRecordingUrl] = React.useState<string | null>(currentAppointment.recordingUrl ?? null);
     const [isRecordingInfoOpen, setIsRecordingInfoOpen] = React.useState(false);
     const [activeMainTab, setActiveMainTab] = React.useState<ClinicalSessionTab>("context");
     const [isChatPanelOpen, setIsChatPanelOpen] = React.useState(false);
     const [isChatPanelContentVisible, setIsChatPanelContentVisible] = React.useState(false);
-        const [isLiveConnecting, setIsLiveConnecting] = React.useState(false);
-        const [isRecorderPaused, setIsRecorderPaused] = React.useState(false);
-        const liveTranscriptionCancelledRef = React.useRef(false);
+    const [isLiveConnecting, setIsLiveConnecting] = React.useState(false);
+    const [isRecorderPaused, setIsRecorderPaused] = React.useState(false);
+    const liveTranscriptionCancelledRef = React.useRef(false);
     const [noteTemplates, setNoteTemplates] = React.useState<Array<{ id: string; name: string; description: string; template: SoapTemplate }>>([]);
     const [selectedTemplateId, setSelectedTemplateId] = React.useState("");
     const [isLoadingNoteTemplates, setIsLoadingNoteTemplates] = React.useState(false);
@@ -362,14 +362,19 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [pendingMetricChatRequest, setPendingMetricChatRequest] = React.useState<MetricChatRequest | null>(null);
     const metricChatRequestIdRef = React.useRef(0);
     const hasAutoOpenedFinalizeRef = React.useRef(false);
-        const hasMountedPanelRef = React.useRef(false);
-        const panelRenderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-        const [isPanelRendering, setIsPanelRendering] = React.useState(false);
-        const transcriptEndRef = React.useRef<HTMLDivElement | null>(null);
-        const liveAudioContextRef = React.useRef<AudioContext | null>(null);
-        const liveProcessorRef = React.useRef<ScriptProcessorNode | null>(null);
-        const liveSourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
-        const isRecorderPausedRef = React.useRef(false);
+    const hasMountedPanelRef = React.useRef(false);
+    const panelRenderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [isPanelRendering, setIsPanelRendering] = React.useState(false);
+    const transcriptEndRef = React.useRef<HTMLDivElement | null>(null);
+    const liveAudioContextRef = React.useRef<AudioContext | null>(null);
+    const liveProcessorRef = React.useRef<ScriptProcessorNode | null>(null);
+    const liveSourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
+    const isRecorderPausedRef = React.useRef(false);
+    const [retrievalMode, setRetrievalMode] = React.useState<"normal" | "semantic">("normal");
+
+    const handleToggleRetrievalMode = React.useCallback(() => {
+        setRetrievalMode((prev) => (prev === "normal" ? "semantic" : "normal"));
+    }, []);
 
     const persistedTranscript = React.useMemo<TranscriptSegment[]>(() => {
         if (!Array.isArray(currentAppointment?.transcript)) {
@@ -419,8 +424,8 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         [editableNoteData, resolvedNoteMetadata],
     );
 
-  const { toast } = useToast();
-  const { startUpload } = useUploadThing("audioUploader");
+    const { toast } = useToast();
+    const { startUpload } = useUploadThing("audioUploader");
 
     const refreshMicrophoneDevices = React.useCallback(async (requestLabels = false, showError = false) => {
         if (!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices)) {
@@ -1179,37 +1184,37 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         description: string;
         complete: boolean;
     }> = [
-        {
-            key: "patientLinked",
-            label: "Patient linked",
-            description: finalizeChecklist.patientLinked
-                ? "Patient is linked and ready for finalization."
-                : finalizeBlockersByKey.get("patientLinked")?.description || "Attach this session to the correct patient profile.",
-            complete: finalizeChecklist.patientLinked,
-        },
-        {
-            key: "transcriptReady",
-            label: "Transcript ready",
-            description: finalizeChecklist.transcriptReady
-                ? "Transcript is available for this session."
-                : finalizeBlockersByKey.get("transcriptReady")?.description
+            {
+                key: "patientLinked",
+                label: "Patient linked",
+                description: finalizeChecklist.patientLinked
+                    ? "Patient is linked and ready for finalization."
+                    : finalizeBlockersByKey.get("patientLinked")?.description || "Attach this session to the correct patient profile.",
+                complete: finalizeChecklist.patientLinked,
+            },
+            {
+                key: "transcriptReady",
+                label: "Transcript ready",
+                description: finalizeChecklist.transcriptReady
+                    ? "Transcript is available for this session."
+                    : finalizeBlockersByKey.get("transcriptReady")?.description
                     || (finalizeChecklistResult?.aiStatus === "PROCESSING"
                         ? "Transcription is still processing. Check Transcript to monitor progress."
                         : "Record or upload audio, then confirm transcription."),
-            complete: finalizeChecklist.transcriptReady,
-        },
-        {
-            key: "noteReady",
-            label: "Visit note generated",
-            description: finalizeChecklist.noteReady
-                ? "Visit note is generated and available."
-                : finalizeBlockersByKey.get("noteReady")?.description
+                complete: finalizeChecklist.transcriptReady,
+            },
+            {
+                key: "noteReady",
+                label: "Visit note generated",
+                description: finalizeChecklist.noteReady
+                    ? "Visit note is generated and available."
+                    : finalizeBlockersByKey.get("noteReady")?.description
                     || (!finalizeChecklist.transcriptReady
                         ? "Complete transcript first, then click Generate in the Note tab."
                         : "Click Generate in the Note tab, then review the generated note."),
-            complete: finalizeChecklist.noteReady,
-        },
-    ];
+                complete: finalizeChecklist.noteReady,
+            },
+        ];
     const finalizeTrackingTasks = React.useMemo(
         () => finalizeTasks.map((task) => ({
             ...task,
@@ -1392,6 +1397,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                     patientUserId: currentAppointment?.patient?.user?.id ?? null,
                     patientMetricCatalog,
                     includePatientDocuments: true,
+                    retrievalMode,
                 },
             },
         }),
@@ -1421,540 +1427,540 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     return (
         <div ref={rootContainerRef} className="relative flex h-[calc(100svh-3rem)] overflow-hidden bg-background">
             <div className="min-w-0 flex flex-1 flex-col">
-            <header className="px-4 sm:px-5 py-3 border-b-2 border-border bg-background/95 backdrop-blur z-10">
-                <div className="flex flex-col gap-2.5">
-                    <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3 min-w-0 text-left">
-                            <button
-                                type="button"
-                                className="rounded-full cursor-pointer"
-                                onClick={handlePatientPrimaryAction}
-                                aria-label={hasLinkedPatient ? "Open patient profile" : "Link patient"}
-                            >
-                                <Avatar className="h-10 w-10 border">
-                                    <AvatarImage src={patientImage || undefined} alt={patientName} />
-                                    <AvatarFallback>{patientInitials}</AvatarFallback>
-                                </Avatar>
-                            </button>
-                            <div className="flex flex-col min-w-0">
-                                <div className="flex items-center gap-2 min-w-0">
-                                    <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">{patientName}</h1>
-                                    {hasLinkedPatient && (
-                                        <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">Patient</Badge>
-                                    )}
-                                    {!hasLinkedPatient && (
+                <header className="px-4 sm:px-5 py-3 border-b-2 border-border bg-background/95 backdrop-blur z-10">
+                    <div className="flex flex-col gap-2.5">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0 text-left">
+                                <button
+                                    type="button"
+                                    className="rounded-full cursor-pointer"
+                                    onClick={handlePatientPrimaryAction}
+                                    aria-label={hasLinkedPatient ? "Open patient profile" : "Link patient"}
+                                >
+                                    <Avatar className="h-10 w-10 border">
+                                        <AvatarImage src={patientImage || undefined} alt={patientName} />
+                                        <AvatarFallback>{patientInitials}</AvatarFallback>
+                                    </Avatar>
+                                </button>
+                                <div className="flex flex-col min-w-0">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">{patientName}</h1>
+                                        {hasLinkedPatient && (
+                                            <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">Patient</Badge>
+                                        )}
+                                        {!hasLinkedPatient && (
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        className="shrink-0"
+                                                        onClick={handlePatientPrimaryAction}
+                                                        aria-label="Link patient"
+                                                    >
+                                                        <Badge variant="outline" className="border-2 border-border bg-muted text-foreground font-semibold hover:bg-muted/80 cursor-pointer">Unlinked</Badge>
+                                                    </button>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="bottom">Link patient</TooltipContent>
+                                            </Tooltip>
+                                        )}
                                         <Tooltip>
                                             <TooltipTrigger asChild>
                                                 <button
                                                     type="button"
-                                                    className="shrink-0"
-                                                    onClick={handlePatientPrimaryAction}
-                                                    aria-label="Link patient"
+                                                    className="p-0 m-0 text-red-500 hover:text-red-600 disabled:opacity-50"
+                                                    onClick={() => setIsDeleteDialogOpen(true)}
+                                                    disabled={isDeletingAppointment}
+                                                    title="Delete session"
+                                                    aria-label="Delete session"
                                                 >
-                                                    <Badge variant="outline" className="border-2 border-border bg-muted text-foreground font-semibold hover:bg-muted/80 cursor-pointer">Unlinked</Badge>
+                                                    <Trash className="h-4 w-4" strokeWidth={2} />
                                                 </button>
                                             </TooltipTrigger>
-                                            <TooltipContent side="bottom">Link patient</TooltipContent>
+                                            <TooltipContent side="bottom">Delete session</TooltipContent>
                                         </Tooltip>
-                                    )}
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <button
-                                                type="button"
-                                                className="p-0 m-0 text-red-500 hover:text-red-600 disabled:opacity-50"
-                                                onClick={() => setIsDeleteDialogOpen(true)}
-                                                disabled={isDeletingAppointment}
-                                                title="Delete session"
-                                                aria-label="Delete session"
-                                            >
-                                                <Trash className="h-4 w-4" strokeWidth={2} />
-                                            </button>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="bottom">Delete session</TooltipContent>
-                                    </Tooltip>
+                                    </div>
+                                    <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
+                                        {hasLinkedPatient ? `Reason: ${reason}` : "Click patient icon or Unlinked label to find and link a patient"}
+                                    </span>
                                 </div>
-                                <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
-                                    {hasLinkedPatient ? `Reason: ${reason}` : "Click patient icon or Unlinked label to find and link a patient"}
-                                </span>
                             </div>
+
+                            <SessionRecordingActions
+                                isUploading={isUploading}
+                                selectedMicrophoneId={selectedMicrophoneId}
+                                onStart={handleRecordingStart}
+                                onPauseChange={handleRecordingPauseChange}
+                                onDiscard={handleRecordingDiscard}
+                                onStop={handleRecordingStop}
+                                onManualUpload={handleManualUpload}
+                                uploadInputRef={uploadInputRef}
+                            />
                         </div>
 
-                        <SessionRecordingActions
-                            isUploading={isUploading}
-                            selectedMicrophoneId={selectedMicrophoneId}
-                            onStart={handleRecordingStart}
-                            onPauseChange={handleRecordingPauseChange}
-                            onDiscard={handleRecordingDiscard}
-                            onStop={handleRecordingStop}
-                            onManualUpload={handleManualUpload}
-                            uploadInputRef={uploadInputRef}
-                        />
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-1.5 text-sm">
-                        {currentAppointment.status !== "UNLINKED" && (
-                            <Badge variant="outline" className={`gap-1.5 py-1 border-2 ${statusBadgeClass}`}>{statusLabel}</Badge>
-                        )}
-                        <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
-                            <Calendar className="h-3.5 w-3.5" />
-                            {appointmentDate ? format(appointmentDate, "MMMM dd, yyyy") : "No date"}
-                        </Badge>
-                        <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
-                            <Clock3 className="h-3.5 w-3.5" />
-                            {appointmentDate ? format(appointmentDate, "hh:mm a") : "--:--"}
-                        </Badge>
-                        {recordingUrl && (
-                            <Badge className="gap-1.5 py-1 pr-1.5 bg-[#CCFF0B] text-black border-2 border-[#B8E609] hover:bg-[#B8E609]">
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                Recording Attached
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-5 w-5 p-0 rounded-full text-black/75 hover:text-black hover:bg-transparent"
-                                    onClick={() => setIsRecordingInfoOpen(true)}
-                                    aria-label="Recording info"
-                                    title="Recording info"
-                                >
-                                    <Info className="h-3.5 w-3.5" />
-                                </Button>
+                        <div className="flex flex-wrap items-center gap-1.5 text-sm">
+                            {currentAppointment.status !== "UNLINKED" && (
+                                <Badge variant="outline" className={`gap-1.5 py-1 border-2 ${statusBadgeClass}`}>{statusLabel}</Badge>
+                            )}
+                            <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
+                                <Calendar className="h-3.5 w-3.5" />
+                                {appointmentDate ? format(appointmentDate, "MMMM dd, yyyy") : "No date"}
                             </Badge>
-                        )}
-                    </div>
-                </div>
-            </header>
-
-            <main className="flex-1 overflow-hidden p-4 pt-6">
-                <div className="mx-auto flex h-full w-full max-w-[1280px] min-h-0">
-                    <div className="min-w-0 flex flex-1 flex-col gap-2.5">
-                        <div ref={tabsRowRef} className="flex items-center justify-between">
-                            <SessionTabs activeTab={activeMainTab} onTabChange={setActiveMainTab} />
+                            <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
+                                <Clock3 className="h-3.5 w-3.5" />
+                                {appointmentDate ? format(appointmentDate, "hh:mm a") : "--:--"}
+                            </Badge>
+                            {recordingUrl && (
+                                <Badge className="gap-1.5 py-1 pr-1.5 bg-[#CCFF0B] text-black border-2 border-[#B8E609] hover:bg-[#B8E609]">
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    Recording Attached
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-5 w-5 p-0 rounded-full text-black/75 hover:text-black hover:bg-transparent"
+                                        onClick={() => setIsRecordingInfoOpen(true)}
+                                        aria-label="Recording info"
+                                        title="Recording info"
+                                    >
+                                        <Info className="h-3.5 w-3.5" />
+                                    </Button>
+                                </Badge>
+                            )}
                         </div>
+                    </div>
+                </header>
 
-                        <div className="flex flex-col flex-1 min-h-0 bg-card rounded-xl border shadow-sm overflow-hidden">
-                            <div className="flex items-center justify-between p-2 border-b bg-muted/30">
-                                <div className="flex items-center gap-2">
-                                    {activeMainTab === "transcript" && (
-                                        <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
-                                            <AudioLines className="h-4 w-4 text-muted-foreground" />
-                                            <span>Live Transcription</span>
-                                        </div>
-                                    )}
-                                    {activeMainTab === "note" && (
-                                        <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
-                                            <PenLine className="h-4 w-4 text-muted-foreground" />
-                                            <span>Template Note</span>
-                                        </div>
-                                    )}
-                                </div>
+                <main className="flex-1 overflow-hidden p-4 pt-6">
+                    <div className="mx-auto flex h-full w-full max-w-[1280px] min-h-0">
+                        <div className="min-w-0 flex flex-1 flex-col gap-2.5">
+                            <div ref={tabsRowRef} className="flex items-center justify-between">
+                                <SessionTabs activeTab={activeMainTab} onTabChange={setActiveMainTab} />
+                            </div>
 
-                                <div className="flex items-center gap-1">
-                                    {activeMainTab === "transcript" && (
-                                        <DropdownMenu
-                                            onOpenChange={(open) => {
-                                                if (open) {
-                                                    void refreshMicrophoneDevices(true, false);
-                                                }
-                                            }}
-                                        >
-                                            <div className="flex items-center border rounded-md bg-background">
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 border-r rounded-none">
-                                                    <Mic className="w-4 h-4" />
-                                                </Button>
-                                                <Badge variant="outline" className="mx-1 gap-1.5 border-border bg-background/80 text-xs font-semibold">
-                                                    <span
-                                                        className={`h-2 w-2 rounded-full ${isLiveConnecting ? "bg-amber-500" : connected ? (isRecorderPaused ? "bg-amber-500" : "bg-emerald-500") : "bg-black shadow-[0_0_8px_1px_rgba(0,0,0,0.45)]"}`}
-                                                        aria-hidden="true"
-                                                    />
-                                                    {isLiveConnecting ? "Connecting" : connected ? (isRecorderPaused ? "Paused" : `Live · ${sessionId?.slice(-6) || "ready"}`) : "Offline"}
-                                                </Badge>
-                                                <DropdownMenuTrigger asChild>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="h-8 w-8 rounded-none px-1"
-                                                        aria-label="Microphone settings"
-                                                        title="Microphone settings"
-                                                    >
-                                                        <ChevronDown className="w-3 h-3" />
-                                                    </Button>
-                                                </DropdownMenuTrigger>
+                            <div className="flex flex-col flex-1 min-h-0 bg-card rounded-xl border shadow-sm overflow-hidden">
+                                <div className="flex items-center justify-between p-2 border-b bg-muted/30">
+                                    <div className="flex items-center gap-2">
+                                        {activeMainTab === "transcript" && (
+                                            <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
+                                                <AudioLines className="h-4 w-4 text-muted-foreground" />
+                                                <span>Live Transcription</span>
                                             </div>
+                                        )}
+                                        {activeMainTab === "note" && (
+                                            <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
+                                                <PenLine className="h-4 w-4 text-muted-foreground" />
+                                                <span>Template Note</span>
+                                            </div>
+                                        )}
+                                    </div>
 
-                                            <DropdownMenuContent align="end" className="w-72">
-                                                <DropdownMenuLabel>Microphone Input</DropdownMenuLabel>
-                                                <DropdownMenuRadioGroup value={selectedMicrophoneId} onValueChange={setSelectedMicrophoneId}>
-                                                    <DropdownMenuRadioItem value="default">System Default</DropdownMenuRadioItem>
-                                                    {selectableMicrophones.map((device, index) => (
-                                                        <DropdownMenuRadioItem key={device.deviceId} value={device.deviceId}>
-                                                            {device.label?.trim() || `Microphone ${index + 1}`}
-                                                        </DropdownMenuRadioItem>
-                                                    ))}
-                                                </DropdownMenuRadioGroup>
-
-                                                {selectableMicrophones.length === 0 && (
-                                                    <DropdownMenuItem disabled>No specific microphones detected</DropdownMenuItem>
-                                                )}
-
-                                                <DropdownMenuSeparator />
-                                                <DropdownMenuItem
-                                                    onClick={() => {
-                                                        void refreshMicrophoneDevices(true, true);
-                                                    }}
-                                                    disabled={isLoadingMicrophones}
-                                                >
-                                                    {isLoadingMicrophones ? "Refreshing devices..." : "Refresh device list"}
-                                                </DropdownMenuItem>
-                                                <DropdownMenuSeparator />
-                                                <DropdownMenuItem disabled title={selectedMicrophoneLabel}>
-                                                    Selected: {selectedMicrophoneLabel}
-                                                </DropdownMenuItem>
-                                                <DropdownMenuItem disabled>
-                                                    Changes apply on next recording start
-                                                </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    )}
-
-                                    {activeMainTab === "note" && (
-                                        <div className="flex items-center gap-2">
-                                            <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
-                                                <SelectTrigger className="h-8 min-w-[240px] bg-background">
-                                                    <SelectValue placeholder={isLoadingNoteTemplates ? "Loading templates..." : "Select template"} />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {noteTemplates.map((template) => (
-                                                        <SelectItem key={template.id} value={template.id}>
-                                                            {template.name}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-
-                                            <Button
-                                                type="button"
-                                                size="sm"
-                                                className="h-8"
-                                                disabled={isGeneratingNote || !selectedTemplateId || !isTranscriptReadyForNote}
-                                                onClick={handleGenerateTemplateNote}
-                                                title={isTranscriptReadyForNote ? "Generate note" : "Transcript required before generating note"}
-                                            >
-                                                {isGeneratingNote ? (
-                                                    <>
-                                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                                        Generating
-                                                    </>
-                                                ) : (
-                                                    "Generate"
-                                                )}
-                                            </Button>
-
-                                            <Button
-                                                type="button"
-                                                size="icon"
-                                                variant="ghost"
-                                                className={`h-8 w-8 rounded-sm ${activeNotePanel === "editor" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                                                onClick={() => setActiveNotePanel("editor")}
-                                                title="Editor"
-                                            >
-                                                <FileCode2 className="h-4 w-4" />
-                                            </Button>
-
-                                            <Button
-                                                type="button"
-                                                size="icon"
-                                                variant="ghost"
-                                                className={`h-8 w-8 rounded-sm ${activeNotePanel === "preview" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                                                onClick={() => setActiveNotePanel("preview")}
-                                                title="Preview"
-                                            >
-                                                <FileText className="h-4 w-4" />
-                                            </Button>
-
-                                            <Button
-                                                type="button"
-                                                size="icon"
-                                                variant="ghost"
-                                                className="h-8 w-8 rounded-sm text-zinc-700 hover:text-zinc-900"
-                                                title={isSavingNote ? "Saving..." : "Save note"}
-                                                disabled={isSavingNote || !isNoteDirty || !selectedTemplateId}
-                                                onClick={() => {
-                                                    void handleSaveTemplateNote();
+                                    <div className="flex items-center gap-1">
+                                        {activeMainTab === "transcript" && (
+                                            <DropdownMenu
+                                                onOpenChange={(open) => {
+                                                    if (open) {
+                                                        void refreshMicrophoneDevices(true, false);
+                                                    }
                                                 }}
                                             >
-                                                {isSavingNote ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                                            </Button>
+                                                <div className="flex items-center border rounded-md bg-background">
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 border-r rounded-none">
+                                                        <Mic className="w-4 h-4" />
+                                                    </Button>
+                                                    <Badge variant="outline" className="mx-1 gap-1.5 border-border bg-background/80 text-xs font-semibold">
+                                                        <span
+                                                            className={`h-2 w-2 rounded-full ${isLiveConnecting ? "bg-amber-500" : connected ? (isRecorderPaused ? "bg-amber-500" : "bg-emerald-500") : "bg-black shadow-[0_0_8px_1px_rgba(0,0,0,0.45)]"}`}
+                                                            aria-hidden="true"
+                                                        />
+                                                        {isLiveConnecting ? "Connecting" : connected ? (isRecorderPaused ? "Paused" : `Live · ${sessionId?.slice(-6) || "ready"}`) : "Offline"}
+                                                    </Badge>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-8 w-8 rounded-none px-1"
+                                                            aria-label="Microphone settings"
+                                                            title="Microphone settings"
+                                                        >
+                                                            <ChevronDown className="w-3 h-3" />
+                                                        </Button>
+                                                    </DropdownMenuTrigger>
+                                                </div>
 
-                                            {selectedTemplate ? (
-                                                <PDFDownloadLink
-                                                    document={<NoteDocument template={selectedTemplate} llmObject={noteDocumentData} />}
-                                                    fileName={`${selectedTemplate.name.toLowerCase().replace(/\s+/g, "-")}.pdf`}
-                                                    className="inline-flex h-8 w-8 items-center justify-center rounded-sm p-0 text-zinc-700 hover:bg-transparent hover:text-zinc-900"
-                                                    title="Download PDF"
+                                                <DropdownMenuContent align="end" className="w-72">
+                                                    <DropdownMenuLabel>Microphone Input</DropdownMenuLabel>
+                                                    <DropdownMenuRadioGroup value={selectedMicrophoneId} onValueChange={setSelectedMicrophoneId}>
+                                                        <DropdownMenuRadioItem value="default">System Default</DropdownMenuRadioItem>
+                                                        {selectableMicrophones.map((device, index) => (
+                                                            <DropdownMenuRadioItem key={device.deviceId} value={device.deviceId}>
+                                                                {device.label?.trim() || `Microphone ${index + 1}`}
+                                                            </DropdownMenuRadioItem>
+                                                        ))}
+                                                    </DropdownMenuRadioGroup>
+
+                                                    {selectableMicrophones.length === 0 && (
+                                                        <DropdownMenuItem disabled>No specific microphones detected</DropdownMenuItem>
+                                                    )}
+
+                                                    <DropdownMenuSeparator />
+                                                    <DropdownMenuItem
+                                                        onClick={() => {
+                                                            void refreshMicrophoneDevices(true, true);
+                                                        }}
+                                                        disabled={isLoadingMicrophones}
+                                                    >
+                                                        {isLoadingMicrophones ? "Refreshing devices..." : "Refresh device list"}
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuSeparator />
+                                                    <DropdownMenuItem disabled title={selectedMicrophoneLabel}>
+                                                        Selected: {selectedMicrophoneLabel}
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem disabled>
+                                                        Changes apply on next recording start
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        )}
+
+                                        {activeMainTab === "note" && (
+                                            <div className="flex items-center gap-2">
+                                                <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+                                                    <SelectTrigger className="h-8 min-w-[240px] bg-background">
+                                                        <SelectValue placeholder={isLoadingNoteTemplates ? "Loading templates..." : "Select template"} />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {noteTemplates.map((template) => (
+                                                            <SelectItem key={template.id} value={template.id}>
+                                                                {template.name}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    className="h-8"
+                                                    disabled={isGeneratingNote || !selectedTemplateId || !isTranscriptReadyForNote}
+                                                    onClick={handleGenerateTemplateNote}
+                                                    title={isTranscriptReadyForNote ? "Generate note" : "Transcript required before generating note"}
                                                 >
-                                                    {({ loading }) =>
-                                                        loading ? (
-                                                            <span className="text-[10px] text-muted-foreground">...</span>
-                                                        ) : (
-                                                            <Download className="h-4 w-4" />
-                                                        )
-                                                    }
-                                                </PDFDownloadLink>
-                                            ) : (
+                                                    {isGeneratingNote ? (
+                                                        <>
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                            Generating
+                                                        </>
+                                                    ) : (
+                                                        "Generate"
+                                                    )}
+                                                </Button>
+
                                                 <Button
                                                     type="button"
                                                     size="icon"
                                                     variant="ghost"
-                                                    className="h-8 w-8 rounded-sm"
-                                                    disabled
-                                                    title="Download PDF"
+                                                    className={`h-8 w-8 rounded-sm ${activeNotePanel === "editor" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                                                    onClick={() => setActiveNotePanel("editor")}
+                                                    title="Editor"
                                                 >
-                                                    <Download className="h-4 w-4" />
+                                                    <FileCode2 className="h-4 w-4" />
                                                 </Button>
+
+                                                <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className={`h-8 w-8 rounded-sm ${activeNotePanel === "preview" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                                                    onClick={() => setActiveNotePanel("preview")}
+                                                    title="Preview"
+                                                >
+                                                    <FileText className="h-4 w-4" />
+                                                </Button>
+
+                                                <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="h-8 w-8 rounded-sm text-zinc-700 hover:text-zinc-900"
+                                                    title={isSavingNote ? "Saving..." : "Save note"}
+                                                    disabled={isSavingNote || !isNoteDirty || !selectedTemplateId}
+                                                    onClick={() => {
+                                                        void handleSaveTemplateNote();
+                                                    }}
+                                                >
+                                                    {isSavingNote ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                                </Button>
+
+                                                {selectedTemplate ? (
+                                                    <PDFDownloadLink
+                                                        document={<NoteDocument template={selectedTemplate} llmObject={noteDocumentData} />}
+                                                        fileName={`${selectedTemplate.name.toLowerCase().replace(/\s+/g, "-")}.pdf`}
+                                                        className="inline-flex h-8 w-8 items-center justify-center rounded-sm p-0 text-zinc-700 hover:bg-transparent hover:text-zinc-900"
+                                                        title="Download PDF"
+                                                    >
+                                                        {({ loading }) =>
+                                                            loading ? (
+                                                                <span className="text-[10px] text-muted-foreground">...</span>
+                                                            ) : (
+                                                                <Download className="h-4 w-4" />
+                                                            )
+                                                        }
+                                                    </PDFDownloadLink>
+                                                ) : (
+                                                    <Button
+                                                        type="button"
+                                                        size="icon"
+                                                        variant="ghost"
+                                                        className="h-8 w-8 rounded-sm"
+                                                        disabled
+                                                        title="Download PDF"
+                                                    >
+                                                        <Download className="h-4 w-4" />
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className={`relative flex-1 min-h-0 p-4 ${activeMainTab === "note" ? "bg-white" : "bg-white/50 dark:bg-black/20"}`}>
+                                    {isMainPanelBusy && (
+                                        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-white">
+                                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                                        </div>
+                                    )}
+
+                                    {activeMainTab === "transcript" ? (
+                                        <LiveTranscriptPanel
+                                            transcript={displayedTranscript}
+                                            draftTranscript={draftTranscript}
+                                            speakerRoles={speakerRoles}
+                                            transcriptEndRef={transcriptEndRef}
+                                        />
+                                    ) : activeMainTab === "note" ? (
+                                        <div className="flex h-full min-h-0 flex-col gap-3">
+                                            {noteTemplates.length === 0 && !isLoadingNoteTemplates ? (
+                                                <div className="rounded-lg border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+                                                    No active personal templates found. Activate templates in Note Studio to generate notes.
+                                                </div>
+                                            ) : null}
+
+                                            <div className="flex-1 min-h-0 overflow-y-auto px-1">
+                                                {activeNotePanel === "editor" ? (
+                                                    selectedTemplate ? (
+                                                        <div className="space-y-4 pb-2">
+                                                            {selectedTemplate.bodySchema.fields.map((field) => {
+                                                                const currentValue = editableNoteData[field.key];
+
+                                                                return (
+                                                                    <div key={field.key} className="space-y-1.5">
+                                                                        <label className="text-sm font-medium text-foreground">{field.label}</label>
+
+                                                                        {field.type === "boolean" ? (
+                                                                            <Select
+                                                                                value={String(currentValue ?? false)}
+                                                                                onValueChange={(value) => handleNoteFieldChange(field.key, value === "true")}
+                                                                            >
+                                                                                <SelectTrigger className="w-full bg-white">
+                                                                                    <SelectValue placeholder="Select value" />
+                                                                                </SelectTrigger>
+                                                                                <SelectContent>
+                                                                                    <SelectItem value="true">True</SelectItem>
+                                                                                    <SelectItem value="false">False</SelectItem>
+                                                                                </SelectContent>
+                                                                            </Select>
+                                                                        ) : field.type === "number" ? (
+                                                                            <Input
+                                                                                type="number"
+                                                                                value={typeof currentValue === "number" ? String(currentValue) : ""}
+                                                                                onChange={(event) => {
+                                                                                    const next = event.target.value;
+                                                                                    handleNoteFieldChange(field.key, next === "" ? 0 : Number(next));
+                                                                                }}
+                                                                                className="bg-white"
+                                                                            />
+                                                                        ) : (
+                                                                            <Textarea
+                                                                                value={typeof currentValue === "string" ? currentValue : String(currentValue ?? "")}
+                                                                                onChange={(event) => handleNoteFieldChange(field.key, event.target.value)}
+                                                                                className="min-h-24 bg-white"
+                                                                            />
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-sm text-muted-foreground">
+                                                            Select an active template to start editing note fields.
+                                                        </p>
+                                                    )
+                                                ) : generatedNoteText ? (
+                                                    <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{generatedNoteText}</p>
+                                                ) : (
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Choose a template and click Generate to create note text from this session transcript.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex h-full min-h-0 flex-col gap-3 rounded-xl border bg-background/70 p-4">
+                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2 text-sm font-medium">
+                                                    <Stethoscope className="h-4 w-4 text-muted-foreground" />
+                                                    Patient Normalized Metric Catalog
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <Badge variant="outline" className="border-border bg-muted/40 text-xs">
+                                                        {patientMetricCatalog.length} metrics
+                                                    </Badge>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="h-8"
+                                                        onClick={() => {
+                                                            void loadPatientMetricCatalog();
+                                                        }}
+                                                        disabled={isMetricCatalogLoading || !hasLinkedPatient}
+                                                    >
+                                                        {isMetricCatalogLoading ? (
+                                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                        ) : (
+                                                            <RotateCcw className="h-3.5 w-3.5" />
+                                                        )}
+                                                        Refresh
+                                                    </Button>
+                                                </div>
+                                            </div>
+
+                                            <p className="text-xs text-muted-foreground">
+                                                Patient context will be shown here, including their reports and metrics.
+                                            </p>
+
+                                            <p className="text-xs text-muted-foreground">
+                                                Chat retrieval maps your question to these normalized SQL metric keys before running structured queries.
+                                            </p>
+
+                                            <Input
+                                                value={metricCatalogSearch}
+                                                onChange={(event) => setMetricCatalogSearch(event.target.value.toLowerCase())}
+                                                placeholder="Search normalized metric keys (e.g. hemoglobin, creatinine, dlc)"
+                                                className="h-9 bg-background"
+                                                disabled={!hasLinkedPatient || isMetricCatalogLoading}
+                                            />
+
+                                            {!hasLinkedPatient ? (
+                                                <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground text-center">
+                                                    Link a patient to load the normalized metric catalog for this session.
+                                                </div>
+                                            ) : metricCatalogError ? (
+                                                <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border border-red-200 bg-red-50/50 p-6 text-sm text-red-700 text-center">
+                                                    {metricCatalogError}
+                                                </div>
+                                            ) : isMetricCatalogLoading ? (
+                                                <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border bg-muted/20 p-6 text-sm text-muted-foreground">
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    Loading normalized metrics...
+                                                </div>
+                                            ) : filteredPatientMetrics.length === 0 ? (
+                                                <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border bg-muted/20 p-6 text-sm text-muted-foreground text-center">
+                                                    {patientMetricCatalog.length === 0
+                                                        ? "No normalized metrics were found for this patient yet."
+                                                        : "No metrics matched your search."}
+                                                </div>
+                                            ) : (
+                                                <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border bg-background p-3">
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {filteredPatientMetrics.map((metric) => (
+                                                            <button
+                                                                key={metric}
+                                                                type="button"
+                                                                onClick={() => handleMetricChipClick(metric)}
+                                                                className="rounded-md border border-border bg-muted px-2.5 py-1 font-mono text-[11px] transition-colors hover:bg-foreground hover:text-background"
+                                                            >
+                                                                {metric}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
                                             )}
                                         </div>
                                     )}
                                 </div>
+
+                                <div className="p-2 border-t bg-muted/10 text-xs text-muted-foreground text-center">
+                                    Review your note before use to ensure it accurately represents the visit
+                                </div>
                             </div>
+                        </div>
+                    </div>
+                </main>
 
-                            <div className={`relative flex-1 min-h-0 p-4 ${activeMainTab === "note" ? "bg-white" : "bg-white/50 dark:bg-black/20"}`}>
-                                {isMainPanelBusy && (
-                                    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-white">
-                                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                                    </div>
-                                )}
-
-                                {activeMainTab === "transcript" ? (
-                                    <LiveTranscriptPanel
-                                        transcript={displayedTranscript}
-                                        draftTranscript={draftTranscript}
-                                        speakerRoles={speakerRoles}
-                                        transcriptEndRef={transcriptEndRef}
-                                    />
-                                ) : activeMainTab === "note" ? (
-                                    <div className="flex h-full min-h-0 flex-col gap-3">
-                                        {noteTemplates.length === 0 && !isLoadingNoteTemplates ? (
-                                            <div className="rounded-lg border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
-                                                No active personal templates found. Activate templates in Note Studio to generate notes.
-                                            </div>
-                                        ) : null}
-
-                                        <div className="flex-1 min-h-0 overflow-y-auto px-1">
-                                            {activeNotePanel === "editor" ? (
-                                                selectedTemplate ? (
-                                                    <div className="space-y-4 pb-2">
-                                                        {selectedTemplate.bodySchema.fields.map((field) => {
-                                                            const currentValue = editableNoteData[field.key];
-
-                                                            return (
-                                                                <div key={field.key} className="space-y-1.5">
-                                                                    <label className="text-sm font-medium text-foreground">{field.label}</label>
-
-                                                                    {field.type === "boolean" ? (
-                                                                        <Select
-                                                                            value={String(currentValue ?? false)}
-                                                                            onValueChange={(value) => handleNoteFieldChange(field.key, value === "true")}
-                                                                        >
-                                                                            <SelectTrigger className="w-full bg-white">
-                                                                                <SelectValue placeholder="Select value" />
-                                                                            </SelectTrigger>
-                                                                            <SelectContent>
-                                                                                <SelectItem value="true">True</SelectItem>
-                                                                                <SelectItem value="false">False</SelectItem>
-                                                                            </SelectContent>
-                                                                        </Select>
-                                                                    ) : field.type === "number" ? (
-                                                                        <Input
-                                                                            type="number"
-                                                                            value={typeof currentValue === "number" ? String(currentValue) : ""}
-                                                                            onChange={(event) => {
-                                                                                const next = event.target.value;
-                                                                                handleNoteFieldChange(field.key, next === "" ? 0 : Number(next));
-                                                                            }}
-                                                                            className="bg-white"
-                                                                        />
-                                                                    ) : (
-                                                                        <Textarea
-                                                                            value={typeof currentValue === "string" ? currentValue : String(currentValue ?? "")}
-                                                                            onChange={(event) => handleNoteFieldChange(field.key, event.target.value)}
-                                                                            className="min-h-24 bg-white"
-                                                                        />
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                ) : (
-                                                    <p className="text-sm text-muted-foreground">
-                                                        Select an active template to start editing note fields.
-                                                    </p>
-                                                )
-                                            ) : generatedNoteText ? (
-                                                <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{generatedNoteText}</p>
-                                            ) : (
-                                                <p className="text-sm text-muted-foreground">
-                                                    Choose a template and click Generate to create note text from this session transcript.
-                                                </p>
+                <div className="border-t border-border bg-background px-4 sm:px-5 py-2.5">
+                    <div className={`mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center ${isSessionFinalized ? "sm:justify-start" : "sm:justify-between"}`}>
+                        <div className="flex min-w-0 items-center">
+                            <div className="min-w-0 flex-1 overflow-x-auto">
+                                <div className="inline-flex min-w-max items-center">
+                                    {finalizeTrackingTasks.map((task, index) => (
+                                        <React.Fragment key={task.key}>
+                                            {index > 0 && (
+                                                <div className={`mx-1 h-px w-6 ${task.complete ? "bg-emerald-300" : "bg-red-300"}`} />
                                             )}
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="flex h-full min-h-0 flex-col gap-3 rounded-xl border bg-background/70 p-4">
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                            <div className="flex items-center gap-2 text-sm font-medium">
-                                                <Stethoscope className="h-4 w-4 text-muted-foreground" />
-                                                Patient Normalized Metric Catalog
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <Badge variant="outline" className="border-border bg-muted/40 text-xs">
-                                                    {patientMetricCatalog.length} metrics
-                                                </Badge>
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="h-8"
-                                                    onClick={() => {
-                                                        void loadPatientMetricCatalog();
-                                                    }}
-                                                    disabled={isMetricCatalogLoading || !hasLinkedPatient}
-                                                >
-                                                    {isMetricCatalogLoading ? (
-                                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                    ) : (
-                                                        <RotateCcw className="h-3.5 w-3.5" />
-                                                    )}
-                                                    Refresh
-                                                </Button>
-                                            </div>
-                                        </div>
 
-                                        <p className="text-xs text-muted-foreground">
-                                            Patient context will be shown here, including their reports and metrics.
-                                        </p>
-
-                                        <p className="text-xs text-muted-foreground">
-                                            Chat retrieval maps your question to these normalized SQL metric keys before running structured queries.
-                                        </p>
-
-                                        <Input
-                                            value={metricCatalogSearch}
-                                            onChange={(event) => setMetricCatalogSearch(event.target.value.toLowerCase())}
-                                            placeholder="Search normalized metric keys (e.g. hemoglobin, creatinine, dlc)"
-                                            className="h-9 bg-background"
-                                            disabled={!hasLinkedPatient || isMetricCatalogLoading}
-                                        />
-
-                                        {!hasLinkedPatient ? (
-                                            <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground text-center">
-                                                Link a patient to load the normalized metric catalog for this session.
-                                            </div>
-                                        ) : metricCatalogError ? (
-                                            <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border border-red-200 bg-red-50/50 p-6 text-sm text-red-700 text-center">
-                                                {metricCatalogError}
-                                            </div>
-                                        ) : isMetricCatalogLoading ? (
-                                            <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border bg-muted/20 p-6 text-sm text-muted-foreground">
-                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                                Loading normalized metrics...
-                                            </div>
-                                        ) : filteredPatientMetrics.length === 0 ? (
-                                            <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border bg-muted/20 p-6 text-sm text-muted-foreground text-center">
-                                                {patientMetricCatalog.length === 0
-                                                    ? "No normalized metrics were found for this patient yet."
-                                                    : "No metrics matched your search."}
-                                            </div>
-                                        ) : (
-                                            <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border bg-background p-3">
-                                                <div className="flex flex-wrap gap-2">
-                                                    {filteredPatientMetrics.map((metric) => (
-                                                        <button
-                                                            key={metric}
-                                                            type="button"
-                                                            onClick={() => handleMetricChipClick(metric)}
-                                                            className="rounded-md border border-border bg-muted px-2.5 py-1 font-mono text-[11px] transition-colors hover:bg-foreground hover:text-background"
-                                                        >
-                                                            {metric}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="p-2 border-t bg-muted/10 text-xs text-muted-foreground text-center">
-                                Review your note before use to ensure it accurately represents the visit
+                                            <button
+                                                type="button"
+                                                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${task.complete
+                                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                                                    : "border-red-200 bg-red-50 text-red-800 hover:bg-red-100"}`}
+                                                disabled={isSessionFinalized || task.complete}
+                                                onClick={() => {
+                                                    if (!isSessionFinalized && !task.complete) {
+                                                        handleFinalizeTaskAction(task.key);
+                                                    }
+                                                }}
+                                                title={task.description}
+                                                aria-label={`${task.label}: ${task.complete ? "complete" : "incomplete"}`}
+                                            >
+                                                <span className={`h-2.5 w-2.5 rounded-full ${task.complete ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
+                                                {task.label}
+                                            </button>
+                                        </React.Fragment>
+                                    ))}
+                                </div>
                             </div>
                         </div>
+
+                        {!isSessionFinalized && (
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 rounded-full border border-stone-300 bg-white p-0 text-stone-700 hover:bg-stone-100 hover:text-stone-900"
+                                    onClick={() => {
+                                        void loadFinalizeChecklist();
+                                    }}
+                                    disabled={isFinalizeChecklistLoading || isFinalizingSession}
+                                    title="Refresh checklist"
+                                    aria-label="Refresh checklist"
+                                >
+                                    {isFinalizeChecklistLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="default"
+                                    className="h-8 border border-black bg-black text-white hover:bg-stone-800 hover:text-white"
+                                    onClick={openFinalizeDialog}
+                                >
+                                    Finalize Session
+                                </Button>
+                            </div>
+                        )}
                     </div>
                 </div>
-            </main>
-
-            <div className="border-t border-border bg-background px-4 sm:px-5 py-2.5">
-                <div className={`mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center ${isSessionFinalized ? "sm:justify-start" : "sm:justify-between"}`}>
-                    <div className="flex min-w-0 items-center">
-                        <div className="min-w-0 flex-1 overflow-x-auto">
-                            <div className="inline-flex min-w-max items-center">
-                                {finalizeTrackingTasks.map((task, index) => (
-                                    <React.Fragment key={task.key}>
-                                        {index > 0 && (
-                                            <div className={`mx-1 h-px w-6 ${task.complete ? "bg-emerald-300" : "bg-red-300"}`} />
-                                        )}
-
-                                        <button
-                                            type="button"
-                                            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${task.complete
-                                                ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
-                                                : "border-red-200 bg-red-50 text-red-800 hover:bg-red-100"}`}
-                                            disabled={isSessionFinalized || task.complete}
-                                            onClick={() => {
-                                                if (!isSessionFinalized && !task.complete) {
-                                                    handleFinalizeTaskAction(task.key);
-                                                }
-                                            }}
-                                            title={task.description}
-                                            aria-label={`${task.label}: ${task.complete ? "complete" : "incomplete"}`}
-                                        >
-                                            <span className={`h-2.5 w-2.5 rounded-full ${task.complete ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
-                                            {task.label}
-                                        </button>
-                                    </React.Fragment>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-
-                    {!isSessionFinalized && (
-                        <div className="flex items-center gap-2">
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 rounded-full border border-stone-300 bg-white p-0 text-stone-700 hover:bg-stone-100 hover:text-stone-900"
-                                onClick={() => {
-                                    void loadFinalizeChecklist();
-                                }}
-                                disabled={isFinalizeChecklistLoading || isFinalizingSession}
-                                title="Refresh checklist"
-                                aria-label="Refresh checklist"
-                            >
-                                {isFinalizeChecklistLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-                            </Button>
-                            <Button
-                                type="button"
-                                size="sm"
-                                variant="default"
-                                className="h-8 border border-black bg-black text-white hover:bg-stone-800 hover:text-white"
-                                onClick={openFinalizeDialog}
-                            >
-                                Finalize Session
-                            </Button>
-                        </div>
-                    )}
-                </div>
-            </div>
             </div>
 
             <Tooltip>
@@ -2003,14 +2009,18 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
                     <div className="flex-1 min-h-0 overflow-hidden">
                         <AssistantRuntimeProvider runtime={chatRuntime}>
-                            <Thread patientName={patientName} />
+                            <Thread
+                                patientName={patientName}
+                                retrievalMode={retrievalMode}
+                                onToggleRetrievalMode={handleToggleRetrievalMode}
+                            />
                         </AssistantRuntimeProvider>
                     </div>
 
                 </div>
             </aside>
 
-            <Dialog open={isProcessing} onOpenChange={() => {}}>
+            <Dialog open={isProcessing} onOpenChange={() => { }}>
                 <DialogContent className="sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
                     <DialogHeader>
                         <DialogTitle>{uploadProgress === 100 ? "Session Saved" : "Finalizing Session"}</DialogTitle>

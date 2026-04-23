@@ -1,10 +1,12 @@
 "use server";
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { uploadVisitSummaryPdf } from "@/lib/uploadthing-server";
-import { buildVisitSummaryFilename, formatVisitSummaryDateLabel, renderVisitSummaryPdfBuffer } from "@/lib/visit-summary-pdf";
+import { uploadVisitSummaryPdfToCloudinary } from "@/lib/cloudinary";
+import { buildVisitSummaryFilename, formatVisitSummaryDateLabel } from "@/lib/visit-summary-pdf";
+import { renderNoteDocumentPdfBuffer } from "@/lib/note-document-pdf";
 import { markSoapNoteAsFinalized } from "@/lib/visit-summary";
+import { mapRecordToSoapTemplate } from "@/lib/template-utils";
 import { currentUser, clerkClient } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -643,7 +645,38 @@ export async function getAppointmentFinalizeChecklist(appointmentId: string): Pr
   };
 }
 
-export async function finalizeAppointmentSession(appointmentId: string): Promise<FinalizeChecklistResult> {
+export async function uploadClientPdfToCloudinary(formData: FormData) {
+  const doctor = await getCurrentDoctor();
+  if (!doctor) return { success: false, error: "Unauthorized" };
+
+  const file = formData.get("file") as File;
+  const appointmentId = formData.get("appointmentId") as string;
+  const filename = formData.get("filename") as string;
+
+  if (!file || !appointmentId) {
+    return { success: false, error: "Missing file or appointment ID" };
+  }
+
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const uploadedUrl = await uploadVisitSummaryPdfToCloudinary({
+      filename: filename || `note-${appointmentId}`,
+      pdfBuffer: buffer,
+    });
+
+    if (!uploadedUrl) throw new Error("Cloudinary returned null URL");
+
+    return { success: true, url: uploadedUrl };
+  } catch (error) {
+    console.error("Failed to upload client PDF to Cloudinary", error);
+    return { success: false, error: "Upload failed" };
+  }
+}
+
+export async function finalizeAppointmentSession(
+  appointmentId: string,
+  preUploadedPdfUrl?: string
+): Promise<FinalizeChecklistResult> {
   const doctor = await getCurrentDoctor();
   if (!doctor) {
     return {
@@ -737,27 +770,52 @@ export async function finalizeAppointmentSession(appointmentId: string): Promise
 
   let noteDownloadUrl = fallbackDownloadUrl;
 
-  if (noteText.trim().length > 0) {
+  if (preUploadedPdfUrl) {
+    noteDownloadUrl = preUploadedPdfUrl;
+  } else {
+    // Try to generate template-based PDF from the appointment's soapNote
     try {
-      const filename = buildVisitSummaryFilename(patientName, visitDateLabel);
-      const pdfBuffer = await renderVisitSummaryPdfBuffer({
-        patientName,
-        doctorName,
-        visitDate: visitDateLabel,
-        reason,
-        noteText,
-      });
+      const soapNote = appointment.soapNote as Record<string, unknown> | null;
+      const templateRef = soapNote?.template as { id?: string } | undefined;
+      const noteData = soapNote?.noteData as Record<string, unknown> | undefined;
+      const noteMetadata = soapNote?.noteMetadata as Record<string, unknown> | undefined;
 
-      const uploadedUrl = await uploadVisitSummaryPdf({
-        filename,
-        pdfBuffer,
-      });
+      if (templateRef?.id && noteData) {
+        const db = prisma as any;
+        const templateRecord = await db.noteTemplate.findFirst({
+          where: {
+            id: templateRef.id,
+            source: "PERSONAL",
+            userId: (await prisma.user.findUnique({
+              where: { clerkId: (await currentUser())!.id },
+              select: { id: true },
+            }))?.id,
+          },
+          include: {
+            fields: {
+              orderBy: { fieldOrder: "asc" },
+            },
+          },
+        });
 
-      if (uploadedUrl) {
-        noteDownloadUrl = uploadedUrl;
+        if (templateRecord) {
+          const template = mapRecordToSoapTemplate(templateRecord);
+          const llmObject = { ...noteData, ...noteMetadata };
+          const pdfBuffer = await renderNoteDocumentPdfBuffer(template, llmObject);
+          const filename = buildVisitSummaryFilename(patientName, visitDateLabel);
+
+          const uploadedUrl = await uploadVisitSummaryPdfToCloudinary({
+            filename,
+            pdfBuffer,
+          });
+
+          if (uploadedUrl) {
+            noteDownloadUrl = uploadedUrl;
+          }
+        }
       }
     } catch (error) {
-      console.error("Failed to persist visit summary PDF; using fallback route", error);
+      console.error("Failed to generate template PDF; using fallback route", error);
     }
   }
 
@@ -814,4 +872,184 @@ export async function deleteAppointmentSession(appointmentId: string) {
   revalidatePath("/doctor");
 
   return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// Previous session / SOAP note retrieval helpers for chat tool calling
+// ---------------------------------------------------------------------------
+
+export type PreviousAppointmentSummary = {
+  id: string;
+  date: Date;
+  status: string;
+  reason: string | null;
+  transcript: unknown;
+  soapNote: unknown;
+};
+
+export async function getPatientPreviousAppointments(
+  appointmentId: string,
+  limit: number = 3
+): Promise<{
+  success: boolean;
+  appointments: PreviousAppointmentSummary[];
+  error?: string;
+}> {
+  const doctor = await getCurrentDoctor();
+  if (!doctor) {
+    return { success: false, appointments: [], error: "Doctor profile not found" };
+  }
+
+  const currentAppointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      doctorId: doctor.id,
+    },
+    select: {
+      patientId: true,
+      date: true,
+    },
+  });
+
+  if (!currentAppointment) {
+    return { success: false, appointments: [], error: "Appointment not found" };
+  }
+
+  if (!currentAppointment.patientId) {
+    return { success: false, appointments: [], error: "No patient linked to this appointment" };
+  }
+
+  const previousAppointments = await prisma.appointment.findMany({
+    where: {
+      patientId: currentAppointment.patientId,
+      doctorId: doctor.id,
+      id: { not: appointmentId },
+      date: { lt: currentAppointment.date },
+      status: { in: ["COMPLETED", "IN_PROGRESS"] },
+      OR: [
+        { transcript: { not: Prisma.JsonNull } },
+        { soapNote: { not: Prisma.JsonNull } },
+      ],
+    },
+    select: {
+      id: true,
+      date: true,
+      status: true,
+      reason: true,
+      transcript: true,
+      soapNote: true,
+    },
+    orderBy: { date: "desc" },
+    take: limit,
+  });
+
+  return {
+    success: true,
+    appointments: previousAppointments.map((appt) => ({
+      id: appt.id,
+      date: appt.date,
+      status: appt.status,
+      reason: appt.reason,
+      transcript: appt.transcript,
+      soapNote: appt.soapNote,
+    })),
+  };
+}
+
+export async function getLastSessionTranscript(appointmentId: string): Promise<{
+  success: boolean;
+  appointmentId: string | null;
+  appointmentDate: Date | null;
+  transcript: Array<{
+    speaker: string;
+    role?: string;
+    text: string;
+    start?: number;
+    end?: number;
+  }> | null;
+  error?: string;
+}> {
+  const result = await getPatientPreviousAppointments(appointmentId, 1);
+  if (!result.success || result.appointments.length === 0) {
+    return {
+      success: false,
+      appointmentId: null,
+      appointmentDate: null,
+      transcript: null,
+      error: result.error || "No previous sessions found for this patient.",
+    };
+  }
+
+  const lastAppointment = result.appointments[0];
+  const rawTranscript = lastAppointment.transcript;
+
+  if (!Array.isArray(rawTranscript) || rawTranscript.length === 0) {
+    return {
+      success: false,
+      appointmentId: lastAppointment.id,
+      appointmentDate: lastAppointment.date,
+      transcript: null,
+      error: "Previous session exists but has no transcript.",
+    };
+  }
+
+  const normalizedTranscript = rawTranscript
+    .filter(
+      (segment): segment is Record<string, unknown> =>
+        segment !== null && typeof segment === "object"
+    )
+    .map((segment) => ({
+      speaker: String(segment.speaker || segment.role || "Speaker").trim(),
+      role: typeof segment.role === "string" ? segment.role : undefined,
+      text: String(segment.text || "").trim(),
+      start: typeof segment.start === "number" ? segment.start : undefined,
+      end: typeof segment.end === "number" ? segment.end : undefined,
+    }))
+    .filter((segment) => segment.text.length > 0);
+
+  return {
+    success: true,
+    appointmentId: lastAppointment.id,
+    appointmentDate: lastAppointment.date,
+    transcript: normalizedTranscript,
+  };
+}
+
+export async function getLastSoapNote(appointmentId: string): Promise<{
+  success: boolean;
+  appointmentId: string | null;
+  appointmentDate: Date | null;
+  soapNote: Record<string, unknown> | null;
+  error?: string;
+}> {
+  const result = await getPatientPreviousAppointments(appointmentId, 1);
+  if (!result.success || result.appointments.length === 0) {
+    return {
+      success: false,
+      appointmentId: null,
+      appointmentDate: null,
+      soapNote: null,
+      error: result.error || "No previous sessions found for this patient.",
+    };
+  }
+
+  const lastAppointment = result.appointments[0];
+  const rawSoapNote = lastAppointment.soapNote;
+
+  if (!rawSoapNote || typeof rawSoapNote !== "object" || Array.isArray(rawSoapNote)) {
+    return {
+      success: false,
+      appointmentId: lastAppointment.id,
+      appointmentDate: lastAppointment.date,
+      soapNote: null,
+      error: "Previous session exists but has no SOAP note.",
+    };
+  }
+
+  return {
+    success: true,
+    appointmentId: lastAppointment.id,
+    appointmentDate: lastAppointment.date,
+    soapNote: rawSoapNote as Record<string, unknown>,
+  };
 }

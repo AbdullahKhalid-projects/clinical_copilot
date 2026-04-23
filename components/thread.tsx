@@ -22,39 +22,40 @@ import {
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  BookOpenText,
   CheckIcon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ClipboardList,
   CopyIcon,
   DownloadIcon,
-  HeartPulse,
   Mic,
   MoreHorizontalIcon,
   PencilIcon,
   RefreshCwIcon,
-  SlidersHorizontal,
   SquareIcon,
   UserRound,
 } from "lucide-react";
-import type { ComponentType, FC } from "react";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible";
+import { type FC, useState } from "react";
 
 type ThreadProps = {
   patientName?: string;
+  retrievalMode?: "normal" | "semantic";
+  onToggleRetrievalMode?: () => void;
 };
 
-type ComposerPreset = {
-  label: string;
-  Icon: ComponentType<{ className?: string }>;
-};
-
-const COMPOSER_PRESETS: ComposerPreset[] = [
-  { label: "Try: blood pressure", Icon: HeartPulse },
-  { label: "Interaction type", Icon: SlidersHorizontal },
-  { label: "Prep question", Icon: ClipboardList },
-];
-
-export const Thread: FC<ThreadProps> = ({ patientName = "Patient" }) => {
+export const Thread: FC<ThreadProps> = ({
+  patientName = "Patient",
+  retrievalMode = "normal",
+  onToggleRetrievalMode,
+}) => {
   return (
     <ThreadPrimitive.Root
       className="aui-root aui-thread-root @container flex h-full flex-col bg-background"
@@ -85,7 +86,11 @@ export const Thread: FC<ThreadProps> = ({ patientName = "Patient" }) => {
 
           <ThreadPrimitive.ViewportFooter className="aui-thread-viewport-footer sticky bottom-0 mt-auto flex flex-col gap-2 overflow-visible rounded-t-(--composer-radius) bg-background pb-0">
             <ThreadScrollToBottom />
-            <Composer patientName={patientName} />
+            <Composer
+              patientName={patientName}
+              retrievalMode={retrievalMode}
+              onToggleRetrievalMode={onToggleRetrievalMode}
+            />
           </ThreadPrimitive.ViewportFooter>
         </div>
       </ThreadPrimitive.Viewport>
@@ -133,19 +138,11 @@ const ThreadWelcome: FC = () => {
   );
 };
 
-const ComposerPresetChip: FC<ComposerPreset> = ({ label, Icon }) => {
-  return (
-    <button
-      type="button"
-      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[#D5CAE5] bg-[#EEEAF9] px-2 py-1 text-xs font-medium text-[#7469C3] transition-colors hover:bg-[#E7E1F7]"
-    >
-      <Icon className="size-3" />
-      <span>{label}</span>
-    </button>
-  );
-};
-
-const Composer: FC<{ patientName: string }> = ({ patientName }) => {
+const Composer: FC<{
+  patientName: string;
+  retrievalMode?: "normal" | "semantic";
+  onToggleRetrievalMode?: () => void;
+}> = ({ patientName, retrievalMode = "normal", onToggleRetrievalMode }) => {
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <ComposerPrimitive.AttachmentDropzone asChild>
@@ -166,28 +163,65 @@ const Composer: FC<{ patientName: string }> = ({ patientName }) => {
 
           <ComposerAttachments />
           <ComposerPrimitive.Input
-            placeholder="Ask a follow-up question..."
+            placeholder={
+              retrievalMode === "semantic"
+                ? "Search your document library..."
+                : "Ask a follow-up question..."
+            }
             className="aui-composer-input h-8 max-h-20 min-h-8 w-full resize-none bg-transparent px-1.5 py-0.5 text-sm leading-5 font-medium text-[#6F4E4E] outline-none placeholder:text-[#8B6F6F]/80"
             rows={1}
             autoFocus
             aria-label="Message input"
           />
-          <ComposerAction />
+          <ComposerAction
+            retrievalMode={retrievalMode}
+            onToggleRetrievalMode={onToggleRetrievalMode}
+          />
         </div>
       </ComposerPrimitive.AttachmentDropzone>
     </ComposerPrimitive.Root>
   );
 };
 
-const ComposerAction: FC = () => {
+const ComposerAction: FC<{
+  retrievalMode?: "normal" | "semantic";
+  onToggleRetrievalMode?: () => void;
+}> = ({ retrievalMode = "normal", onToggleRetrievalMode }) => {
+  const isSemantic = retrievalMode === "semantic";
+
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between gap-1.5">
-      <div className="flex min-w-0 items-center gap-1.5">
+      <div className="flex min-w-0 items-center gap-2">
         <ComposerAddAttachment />
-        <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto pr-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {COMPOSER_PRESETS.map((preset) => (
-            <ComposerPresetChip key={preset.label} label={preset.label} Icon={preset.Icon} />
-          ))}
+        <div
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 transition-colors",
+            isSemantic
+              ? "border-[#7469C3]/30 bg-[#7469C3]/10"
+              : "border-transparent hover:bg-muted/50"
+          )}
+        >
+          <BookOpenText
+            className={cn(
+              "h-3.5 w-3.5 shrink-0",
+              isSemantic ? "text-[#7469C3]" : "text-muted-foreground"
+            )}
+          />
+          <Label
+            htmlFor="retrieval-mode-switch"
+            className={cn(
+              "cursor-pointer select-none text-[11px] font-medium leading-none",
+              isSemantic ? "text-[#7469C3]" : "text-muted-foreground"
+            )}
+          >
+            {isSemantic ? "Doc Search" : "Doc Search"}
+          </Label>
+          <Switch
+            id="retrieval-mode-switch"
+            checked={isSemantic}
+            onCheckedChange={onToggleRetrievalMode}
+            className="h-3.5 w-7 data-[state=checked]:bg-[#7469C3]"
+          />
         </div>
       </div>
 
@@ -245,6 +279,28 @@ const MessageError: FC = () => {
   );
 };
 
+const ReasoningCollapsible: FC<{ text: string }> = ({ text }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!text?.trim()) return null;
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} className="my-2">
+      <CollapsibleTrigger className="flex items-center gap-1.5 rounded-md border border-border/50 bg-muted/40 px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/60 transition-colors cursor-pointer">
+        <span>Thinking</span>
+        <ChevronDownIcon
+          className={cn("h-3 w-3 transition-transform duration-200", isOpen && "rotate-180")}
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-1.5 overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
+        <div className="rounded-md border border-border/30 bg-muted/20 px-3 py-2 text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+          {text}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+};
+
 const AssistantMessage: FC = () => {
   // reserves space for action bar and compensates with `-mb` for consistent msg spacing
   // keeps hovered action bar from shifting layout (autohide doesn't support absolute positioning well)
@@ -265,6 +321,7 @@ const AssistantMessage: FC = () => {
         <MessagePrimitive.Parts
           components={{
             Text: MarkdownText,
+            Reasoning: ReasoningCollapsible,
             tools: { Fallback: ToolFallback },
           }}
         />

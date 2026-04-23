@@ -2,6 +2,7 @@
 
 import { currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { buildVisitSummaryExcerpt, extractNoteTextFromSoapNote, getSoapNoteFinalizedAt } from "@/lib/visit-summary";
 import { redirect } from "next/navigation";
 
@@ -13,6 +14,7 @@ export type PatientVisitSummaryItem = {
   noteExcerpt: string;
   finalizedAt: string | null;
   downloadUrl: string;
+  viewUrl: string;
 };
 
 export async function getPatientDashboardData() {
@@ -265,14 +267,55 @@ export async function getPatientVisitSummaries(): Promise<PatientVisitSummaryIte
         reason: appointment.reason?.trim() || "Clinical follow-up",
         noteExcerpt: buildVisitSummaryExcerpt(noteText),
         finalizedAt: getSoapNoteFinalizedAt(appointment.soapNote) ?? appointment.updatedAt.toISOString(),
-        downloadUrl:
-          appointment.soapNoteUrl?.trim() ||
-          `/api/patient/visit-summaries/${appointment.id}/download`,
+        viewUrl: `/api/patient/visit-summaries/${appointment.id}/download?mode=view`,
+        downloadUrl: `/api/patient/visit-summaries/${appointment.id}/download?mode=download`,
       } satisfies PatientVisitSummaryItem;
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);
 
   return summaries;
+}
+
+export async function deleteVisitSummary(appointmentId: string): Promise<{ success: boolean; error?: string }> {
+  const user = await currentUser();
+
+  if (!user) {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  const dbUser = await prisma.user.findUnique({
+    where: { clerkId: user.id },
+    include: {
+      patientProfile: {
+        select: {
+          id: true,
+        },
+      },
+    },
+  });
+
+  if (!dbUser?.patientProfile) {
+    return { success: false, error: "Patient profile not found" };
+  }
+
+  try {
+    await prisma.appointment.updateMany({
+      where: {
+        id: appointmentId,
+        patientId: dbUser.patientProfile.id,
+        status: "COMPLETED",
+      },
+      data: {
+        soapNote: Prisma.JsonNull,
+        soapNoteUrl: null,
+      },
+    });
+
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to delete visit summary:", error);
+    return { success: false, error: "Failed to delete visit summary" };
+  }
 }
 
 export async function getPatientReportById(reportId: string) {

@@ -1,7 +1,13 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { NextResponse } from "next/server";
-import { buildGenerationPrompt, mergeRetrievedChunks, structuredResultToChunks } from "@/retrieval_actions/generation";
+import {
+  buildGenerationPrompt,
+  formatSoapNoteForModel,
+  formatTranscriptForModel,
+  mergeRetrievedChunks,
+  structuredResultToChunks,
+} from "@/retrieval_actions/generation";
 import {
   classifyQueryIntent,
   type ClassifiedIntent,
@@ -13,14 +19,22 @@ import {
 import { prisma } from "@/lib/prisma";
 import { resolveMetricQuery } from "@/retrieval_actions/metricQueryResolver";
 import { CANONICAL_METRICS } from "@/retrieval_actions/metricAliasDictionary";
+import {
+  getLastSessionTranscript,
+  getLastSoapNote,
+} from "@/app/doctor/clinical-session/actions";
+import { searchVectorDatabase } from "@/retrieval_actions/actions";
 import { z } from "zod";
 
 const SYSTEM_PROMPT =
-  "You are Shifa, a clinical copilot assistant. Give concise, clinically useful responses, acknowledge uncertainty, and suggest next best questions when appropriate.";
+  "You are Shifa, a clinical copilot assistant. Provide thorough, clinically useful responses with relevant analysis when warranted. Acknowledge uncertainty and suggest next best questions when appropriate. However, do not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.";
 
 const RAG_MODEL_BASE_URL =
-  "https://muddasirjaved666--example-qwen3-6-35b-a3b-awq-inference--b0eb28.modal.run/v1";
-const RAG_MODEL_NAME = "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit";
+  process.env.CHAT_PANEL_MODEL_URL?.trim() ||
+  "https://muddasirjaved666--example-qwen3-6-27b-awq-inference-vllm-d9a03f.modal.run/v1";
+const RAG_MODEL_NAME =
+  process.env.CHAT_PANEL_MODEL_NAME?.trim() ||
+  "cyankiwi/Qwen3.6-27B-AWQ-INT4";
 const RAG_MODEL_API_KEY = process.env.RAG_MODEL_API_KEY ?? "dummy-key";
 const RAG_EMPTY_204_RETRY_COUNT = Math.max(
   0,
@@ -352,6 +366,7 @@ type ChatContextPayload = {
   patientUserId?: string | null;
   patientMetricCatalog?: string[] | null;
   includePatientDocuments?: boolean;
+  retrievalMode?: "normal" | "semantic";
 };
 
 const STRUCTURED_TOOL_INTENTS = [
@@ -403,6 +418,54 @@ type LatestReportsToolResult = {
   latestReportsTable: string;
   error?: string;
 };
+
+type LastSessionToolResult = {
+  ok: boolean;
+  appointmentId: string | null;
+  appointmentDate: string | null;
+  transcriptText: string;
+  entryCount: number;
+  error?: string;
+};
+
+type LastSoapNoteToolResult = {
+  ok: boolean;
+  appointmentId: string | null;
+  appointmentDate: string | null;
+  soapNoteText: string;
+  error?: string;
+};
+
+function formatLastSessionToolOutput(result: LastSessionToolResult): string {
+  if (!result.ok) {
+    return `Failed to retrieve last session transcript: ${result.error ?? "Unknown error."}`;
+  }
+
+  return [
+    `Successfully retrieved last session transcript.`,
+    `Session ID: ${result.appointmentId ?? "unknown"}`,
+    `Session Date: ${result.appointmentDate ?? "unknown"}`,
+    `Entries: ${result.entryCount}`,
+    "",
+    "Transcript:",
+    result.transcriptText,
+  ].join("\n");
+}
+
+function formatLastSoapNoteToolOutput(result: LastSoapNoteToolResult): string {
+  if (!result.ok) {
+    return `Failed to retrieve last SOAP note: ${result.error ?? "Unknown error."}`;
+  }
+
+  return [
+    `Successfully retrieved last SOAP note.`,
+    `Session ID: ${result.appointmentId ?? "unknown"}`,
+    `Session Date: ${result.appointmentDate ?? "unknown"}`,
+    "",
+    "SOAP Note:",
+    result.soapNoteText,
+  ].join("\n");
+}
 
 function formatStructuredToolOutput(result: StructuredToolResult): string {
   if (!result.ok) {
@@ -1050,6 +1113,106 @@ async function executeLatestReportsTool(context: {
   }
 }
 
+async function executeLastSessionTranscriptTool(context: {
+  appointmentId: string | null;
+}): Promise<LastSessionToolResult> {
+  if (!context.appointmentId) {
+    return {
+      ok: false,
+      appointmentId: null,
+      appointmentDate: null,
+      transcriptText: "",
+      entryCount: 0,
+      error: "No appointment ID was available in chat context.",
+    };
+  }
+
+  try {
+    const result = await getLastSessionTranscript(context.appointmentId);
+    if (!result.success) {
+      return {
+        ok: false,
+        appointmentId: result.appointmentId,
+        appointmentDate: result.appointmentDate
+          ? result.appointmentDate.toISOString().slice(0, 10)
+          : null,
+        transcriptText: "",
+        entryCount: 0,
+        error: result.error ?? "Failed to retrieve last session transcript.",
+      };
+    }
+
+    const transcriptText = formatTranscriptForModel(result.transcript);
+    return {
+      ok: true,
+      appointmentId: result.appointmentId,
+      appointmentDate: result.appointmentDate
+        ? result.appointmentDate.toISOString().slice(0, 10)
+        : null,
+      transcriptText,
+      entryCount: result.transcript?.length ?? 0,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown transcript retrieval error.";
+    return {
+      ok: false,
+      appointmentId: null,
+      appointmentDate: null,
+      transcriptText: "",
+      entryCount: 0,
+      error: message,
+    };
+  }
+}
+
+async function executeLastSoapNoteTool(context: {
+  appointmentId: string | null;
+}): Promise<LastSoapNoteToolResult> {
+  if (!context.appointmentId) {
+    return {
+      ok: false,
+      appointmentId: null,
+      appointmentDate: null,
+      soapNoteText: "",
+      error: "No appointment ID was available in chat context.",
+    };
+  }
+
+  try {
+    const result = await getLastSoapNote(context.appointmentId);
+    if (!result.success) {
+      return {
+        ok: false,
+        appointmentId: result.appointmentId,
+        appointmentDate: result.appointmentDate
+          ? result.appointmentDate.toISOString().slice(0, 10)
+          : null,
+        soapNoteText: "",
+        error: result.error ?? "Failed to retrieve last SOAP note.",
+      };
+    }
+
+    const soapNoteText = formatSoapNoteForModel(result.soapNote);
+    return {
+      ok: true,
+      appointmentId: result.appointmentId,
+      appointmentDate: result.appointmentDate
+        ? result.appointmentDate.toISOString().slice(0, 10)
+        : null,
+      soapNoteText,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown SOAP note retrieval error.";
+    return {
+      ok: false,
+      appointmentId: null,
+      appointmentDate: null,
+      soapNoteText: "",
+      error: message,
+    };
+  }
+}
+
 async function buildGroundedPrompt(
   messages: UIMessage[],
   chatContext: ChatContextPayload = {}
@@ -1132,12 +1295,11 @@ export async function POST(request: Request) {
       const greetingResult = streamText({
         model: ragModelProvider.chat(RAG_MODEL_NAME),
         system: SYSTEM_PROMPT,
-        prompt: "Give a brief clinical greeting and ask one focused follow-up question.",
-        experimental_transform: createStripThinkTransform(),
+        prompt: "Give a brief clinical greeting and ask one focused follow-up question. Do not offer to perform actions you cannot carry out after your greeting.",
       });
 
       return greetingResult.toUIMessageStreamResponse({
-        sendReasoning: false,
+        sendReasoning: true,
         onError: (error) => {
           console.error("AI chat stream failed", { requestId, mode: "greeting", error });
           return formatChatStreamError(error);
@@ -1150,21 +1312,79 @@ export async function POST(request: Request) {
       ? await getPatientMetricCatalog(patientUserId, chatContext.patientMetricCatalog)
       : [];
 
+    // Semantic retrieval mode: direct RAG via vector search, no tool-calling.
+    if (chatContext.retrievalMode === "semantic") {
+      try {
+        const semanticResults = await searchVectorDatabase(latestUserQuery, 50, "all", {
+          includePatientDocuments: true,
+          patientUserId,
+          patientProfileId: chatContext.patientProfileId ?? null,
+        });
+
+        const semanticChunks = semanticResults.map((result) => ({
+          parentChunkId: result.parentChunkId,
+          parentText: result.parentText,
+          documentId: result.documentId,
+          documentTitle: result.documentTitle || "Untitled Source",
+          score: result.score,
+        }));
+
+        const mergedContext = mergeRetrievedChunks({
+          semanticChunks,
+          maxChunks: RAG_MAX_CONTEXT_CHUNKS,
+          maxChunkChars: RAG_MAX_CHUNK_CHARS,
+          maxTotalChars: RAG_MAX_TOTAL_CHARS,
+          prioritizeStructured: false,
+        });
+
+        const conversationContext = getConversationContext(messages);
+
+        const promptPayload = buildGenerationPrompt({
+          query: latestUserQuery,
+          mergedContext,
+          patientContext: conversationContext ? `Recent chat:\n${conversationContext}` : undefined,
+          responseStyle: "concise",
+        });
+
+        const semanticResult = streamText({
+          model: ragModelProvider.chat(RAG_MODEL_NAME),
+          system: [
+            SYSTEM_PROMPT,
+            "You are in semantic retrieval mode. Ground every statement in the retrieved document passages.",
+            "Cite sources by document title when possible.",
+            "If the retrieved passages do not contain relevant information, state that clearly and do not speculate.",
+            "Do not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.",
+          ].join("\n"),
+          prompt: promptPayload.userPrompt,
+        });
+
+        return semanticResult.toUIMessageStreamResponse({
+          sendReasoning: true,
+          onError: (error) => {
+            console.error("AI chat stream failed", { requestId, mode: "semantic-rag", error });
+            return formatChatStreamError(error);
+          },
+        });
+      } catch (error) {
+        console.error("Semantic retrieval failed", { requestId, error });
+        // Fall through to normal mode as fallback
+      }
+    }
+
     // Keep the existing non-tool path available as fallback when patient context is missing.
     if (!patientUserId) {
       const groundedPrompt = await buildGroundedPrompt(messages, chatContext);
 
-      const fallbackResult = streamText({
-        model: ragModelProvider.chat(RAG_MODEL_NAME),
-        system: groundedPrompt.systemPrompt,
-        prompt: groundedPrompt.userPrompt,
-        experimental_transform: createStripThinkTransform(),
-      });
+        const fallbackResult = streamText({
+          model: ragModelProvider.chat(RAG_MODEL_NAME),
+          system: `${groundedPrompt.systemPrompt}\nDo not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.`,
+          prompt: groundedPrompt.userPrompt,
+        });
 
-      return fallbackResult.toUIMessageStreamResponse({
-        sendReasoning: false,
-        onError: (error) => {
-          console.error("AI chat stream failed", { requestId, mode: "fallback-no-patient", error });
+        return fallbackResult.toUIMessageStreamResponse({
+          sendReasoning: true,
+          onError: (error) => {
+            console.error("AI chat stream failed", { requestId, mode: "fallback-no-patient", error });
           return formatChatStreamError(error);
         },
       });
@@ -1174,17 +1394,16 @@ export async function POST(request: Request) {
     if (!STRUCTURED_TOOL_CALLING_ENABLED) {
       const groundedPrompt = await buildGroundedPrompt(messages, chatContext);
 
-      const fallbackResult = streamText({
-        model: ragModelProvider.chat(RAG_MODEL_NAME),
-        system: groundedPrompt.systemPrompt,
-        prompt: groundedPrompt.userPrompt,
-        experimental_transform: createStripThinkTransform(),
-      });
+        const fallbackResult = streamText({
+          model: ragModelProvider.chat(RAG_MODEL_NAME),
+          system: `${groundedPrompt.systemPrompt}\nDo not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.`,
+          prompt: groundedPrompt.userPrompt,
+        });
 
-      return fallbackResult.toUIMessageStreamResponse({
-        sendReasoning: false,
-        onError: (error) => {
-          console.error("AI chat stream failed", { requestId, mode: "fallback-tooling-disabled", error });
+        return fallbackResult.toUIMessageStreamResponse({
+          sendReasoning: true,
+          onError: (error) => {
+            console.error("AI chat stream failed", { requestId, mode: "fallback-tooling-disabled", error });
           return formatChatStreamError(error);
         },
       });
@@ -1201,8 +1420,13 @@ export async function POST(request: Request) {
         "For direct latest-value requests, prefer the structuredLatestMetric tool.",
         "For history, trend, and abnormal requests, use structuredRetrieval.",
         "For recent report summary requests, use getLatestReports.",
+        "For summarizing the previous visit conversation, use retrieveLastSession.",
+        "For reviewing the previous visit SOAP note, use getLastSoapNote.",
         "If a tool returns ok=false, explain the issue and ask a concise follow-up clarifying question.",
         "For tool-provided history tables, preserve all rows in markdown table form when possible.",
+        "When summarizing a previous session transcript, focus on the chief complaint, key history, and any changes since the last visit.",
+        "When reviewing a previous SOAP note, highlight the prior assessment, plan, and any follow-up items that may be relevant to the current visit.",
+        "Do not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.",
       ].join("\n"),
       prompt: [
         "Clinical question:",
@@ -1214,7 +1438,7 @@ export async function POST(request: Request) {
       tools: {
         structuredLatestMetric: tool({
           description:
-            "Get the latest value for a specific patient metric using structured retrieval.",
+            "Get the latest value for a specific patient metric using structured retrieval. This is for single value retrieval, it is not for complete historical retrieval where many values may be returned - in that case use the more flexible structuredRetrieval tool with the appropriate intent.",
           inputSchema: z.object({
             metricQuery: z
               .string()
@@ -1306,6 +1530,28 @@ export async function POST(request: Request) {
               })
             ),
         }),
+        retrieveLastSession: tool({
+          description:
+            "Retrieve the transcript from the patient's most recent previous clinical session. Use this when the user asks about what happened in the last visit, previous conversation, or wants a summary of the prior session dialogue. Returns a formatted dialogue transcript with speaker labels.",
+          inputSchema: z.object({}),
+          execute: async () =>
+            formatLastSessionToolOutput(
+              await executeLastSessionTranscriptTool({
+                appointmentId: chatContext.appointmentId ?? null,
+              })
+            ),
+        }),
+        getLastSoapNote: tool({
+          description:
+            "Retrieve the SOAP note from the patient's most recent previous clinical session. Use this when the user asks about the previous visit note, prior assessment, or wants to review what was documented in the last encounter. Returns a formatted SOAP note with sections.",
+          inputSchema: z.object({}),
+          execute: async () =>
+            formatLastSoapNoteToolOutput(
+              await executeLastSoapNoteTool({
+                appointmentId: chatContext.appointmentId ?? null,
+              })
+            ),
+        }),
       },
       stopWhen: stepCountIs(5),
       providerOptions: {
@@ -1328,11 +1574,10 @@ export async function POST(request: Request) {
           })),
         });
       },
-      experimental_transform: createStripThinkTransform(),
     });
 
     return toolResult.toUIMessageStreamResponse({
-      sendReasoning: false,
+      sendReasoning: true,
       onError: (error) => {
         console.error("AI chat stream failed", { requestId, mode: "tool-calling", error });
         return formatChatStreamError(error);

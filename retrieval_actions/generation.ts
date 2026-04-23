@@ -503,6 +503,146 @@ export function mergeRetrievedChunks(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Transcript / SOAP note formatting helpers for session-history tools
+// ---------------------------------------------------------------------------
+
+export interface TranscriptSegment {
+  speaker: string;
+  role?: string;
+  text: string;
+  start?: number;
+  end?: number;
+}
+
+const TRANSCRIPT_MAX_TOTAL_CHARS = 8000;
+const TRANSCRIPT_MAX_ENTRY_CHARS = 400;
+const SOAP_NOTE_MAX_TOTAL_CHARS = 6000;
+const SOAP_NOTE_MAX_FIELD_CHARS = 1200;
+
+function normalizeTranscriptSpeaker(segment: TranscriptSegment): string {
+  const role = (segment.role || segment.speaker || "Speaker").trim();
+  if (/^doctor|physician|clinician|provider/i.test(role)) return "Doctor";
+  if (/^patient/i.test(role)) return "Patient";
+  return role;
+}
+
+function trimTranscriptEntryText(text: string, maxChars: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}...`;
+}
+
+export function formatTranscriptForModel(
+  transcript: TranscriptSegment[] | null | undefined,
+  options?: { maxTotalChars?: number; maxEntryChars?: number }
+): string {
+  if (!Array.isArray(transcript) || transcript.length === 0) {
+    return "No transcript available.";
+  }
+
+  const maxTotalChars = options?.maxTotalChars ?? TRANSCRIPT_MAX_TOTAL_CHARS;
+  const maxEntryChars = options?.maxEntryChars ?? TRANSCRIPT_MAX_ENTRY_CHARS;
+
+  const lines: string[] = [];
+  let usedChars = 0;
+
+  for (const segment of transcript) {
+    const speaker = normalizeTranscriptSpeaker(segment);
+    const text = trimTranscriptEntryText(segment.text || "", maxEntryChars);
+    const line = `${speaker}: ${text}`;
+
+    if (usedChars + line.length + 1 > maxTotalChars) {
+      if (lines.length === 0) {
+        lines.push(`${line.slice(0, maxTotalChars - 3)}...`);
+      }
+      break;
+    }
+
+    lines.push(line);
+    usedChars += line.length + 1;
+  }
+
+  if (lines.length < transcript.length) {
+    lines.push(`[${transcript.length - lines.length} additional entries omitted for brevity]`);
+  }
+
+  return lines.join("\n");
+}
+
+export function formatSoapNoteForModel(
+  soapNote: Record<string, unknown> | null | undefined,
+  options?: { maxTotalChars?: number; maxFieldChars?: number }
+): string {
+  if (!soapNote || typeof soapNote !== "object" || Array.isArray(soapNote)) {
+    return "No SOAP note available.";
+  }
+
+  const maxTotalChars = options?.maxTotalChars ?? SOAP_NOTE_MAX_TOTAL_CHARS;
+  const maxFieldChars = options?.maxFieldChars ?? SOAP_NOTE_MAX_FIELD_CHARS;
+
+  const priorityFields = ["subjective", "objective", "assessment", "plan", "noteText"];
+  const lines: string[] = [];
+  let usedChars = 0;
+
+  // First pass: priority SOAP fields
+  for (const key of priorityFields) {
+    const value = soapNote[key];
+    if (typeof value !== "string" || value.trim().length === 0) continue;
+
+    const normalized = value.replace(/\s+/g, " ").trim();
+    const trimmed =
+      normalized.length > maxFieldChars
+        ? `${normalized.slice(0, Math.max(0, maxFieldChars - 1)).trimEnd()}...`
+        : normalized;
+
+    const line = `## ${key.charAt(0).toUpperCase() + key.slice(1)}\n${trimmed}`;
+    if (usedChars + line.length + 2 > maxTotalChars) {
+      if (lines.length === 0) {
+        lines.push(line.slice(0, maxTotalChars - 3) + "...");
+      }
+      break;
+    }
+    lines.push(line);
+    usedChars += line.length + 2;
+  }
+
+  // Second pass: noteData fields if present
+  const noteData = soapNote.noteData;
+  if (
+    noteData &&
+    typeof noteData === "object" &&
+    !Array.isArray(noteData) &&
+    usedChars < maxTotalChars
+  ) {
+    for (const [key, value] of Object.entries(noteData)) {
+      if (priorityFields.includes(key)) continue;
+      const text = typeof value === "string" ? value : JSON.stringify(value);
+      if (!text || text.trim().length === 0) continue;
+
+      const normalized = text.replace(/\s+/g, " ").trim();
+      const trimmed =
+        normalized.length > maxFieldChars
+          ? `${normalized.slice(0, Math.max(0, maxFieldChars - 1)).trimEnd()}...`
+          : normalized;
+
+      const line = `## ${key}\n${trimmed}`;
+      if (usedChars + line.length + 2 > maxTotalChars) {
+        lines.push("[Additional SOAP fields omitted for brevity]");
+        break;
+      }
+      lines.push(line);
+      usedChars += line.length + 2;
+    }
+  }
+
+  if (lines.length === 0) {
+    return "SOAP note exists but contains no readable text fields.";
+  }
+
+  return lines.join("\n\n");
+}
+
 export function buildGenerationPrompt(
   input: BuildGenerationPromptInput
 ): GenerationPromptPayload {

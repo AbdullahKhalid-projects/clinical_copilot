@@ -14,8 +14,8 @@ async function main() {
   console.log("Checking for Doctor users without profiles...")
 
 
- // add the email of the user you want to fix here (or a unique part of it for a contains search) 
-  const emailPattern = "khalidabdullah651@gmail.com" 
+ // Use EMAIL_PATTERN from env to avoid hardcoding user-specific identifiers.
+  const emailPattern = process.env.EMAIL_PATTERN ?? "khalidabdullah651@gmail.com"
   
   const user = await prisma.user.findFirst({
     where: {

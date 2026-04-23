@@ -123,6 +123,91 @@ export async function createPatientUserWithPassword(data: {
   }
 }
 
+export async function createDoctorUserWithPassword(data: {
+  email: string;
+  password: string;
+  name?: string;
+  specialization?: string;
+}) {
+  const email = data.email.trim().toLowerCase();
+  const password = data.password.trim();
+  const name = data.name?.trim() || "Demo Doctor";
+  const specialization = data.specialization?.trim() || "General Practice";
+
+  if (!email) {
+    throw new Error("Email is required");
+  }
+
+  if (password.length < 8) {
+    throw new Error("Password must be at least 8 characters long");
+  }
+
+  const existingEmail = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+
+  if (existingEmail) {
+    throw new Error("A user with this email already exists in the database");
+  }
+
+  const clerk = await clerkClient();
+
+  const createdClerkUser = await clerk.users.createUser({
+    emailAddress: [email],
+    password,
+    firstName: name.split(" ")[0] || "Demo",
+    lastName: name.split(" ").slice(1).join(" ") || "Doctor",
+  });
+
+  try {
+    const dbUser = await prisma.user.upsert({
+      where: { clerkId: createdClerkUser.id },
+      update: {
+        email,
+        name,
+        role: "DOCTOR",
+      },
+      create: {
+        clerkId: createdClerkUser.id,
+        email,
+        name,
+        role: "DOCTOR",
+      },
+      select: {
+        id: true,
+        clerkId: true,
+        email: true,
+        role: true,
+      },
+    });
+
+    const doctorProfile = await prisma.doctorProfile.upsert({
+      where: { userId: dbUser.id },
+      update: {
+        specialization,
+      },
+      create: {
+        userId: dbUser.id,
+        specialization,
+      },
+      select: {
+        id: true,
+        userId: true,
+      },
+    });
+
+    return {
+      success: true,
+      user: dbUser,
+      doctorProfile,
+    };
+  } catch (error) {
+    console.error("Error creating doctor user with password:", error);
+    throw error;
+  }
+}
+
 export async function updateUser(clerkId: string, data: {
   email?: string;
   name?: string;

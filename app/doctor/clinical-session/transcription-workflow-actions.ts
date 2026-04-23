@@ -229,3 +229,4 @@ export async function getAppointmentTranscriptionStatus(appointmentId: string) {
     updatedAt: appointment.updatedAt,
   };
 }
+
