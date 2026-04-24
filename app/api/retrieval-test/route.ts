@@ -245,6 +245,7 @@ async function runRetrievalDebug(payload: RetrievalDebugRequest) {
                   { userId: resolvedPatientUserId },
                   { patientUserId: resolvedPatientUserId },
                   { ownerUserId: resolvedPatientUserId },
+                  { patientId: resolvedPatientUserId },
                 ]
               : []),
             ...(resolvedPatientProfileId

@@ -21,6 +21,7 @@ export interface SearchVectorDatabaseOptions {
   includePatientDocuments?: boolean;
   patientUserId?: string | null;
   patientProfileId?: string | null;
+  skipDbValidation?: boolean;
 }
 
 type RetrievalDocumentType = "medicine" | "disease" | "patient";
@@ -145,7 +146,8 @@ function buildPineconeFilter(
     patientScopeFilters.push(
       { userId: patientScope.patientUserId },
       { patientUserId: patientScope.patientUserId },
-      { ownerUserId: patientScope.patientUserId }
+      { ownerUserId: patientScope.patientUserId },
+      { patientId: patientScope.patientUserId }
     );
   }
 
@@ -173,11 +175,11 @@ function buildPineconeFilter(
       : { type: { $in: nonPatientTypes } };
   }
 
+  // Flat patient condition: type="patient" AND (any of the patient scope filters)
+  // Pinecone implicitly ANDs top-level keys, so we combine type + $or directly.
   const patientCondition: Record<string, unknown> = {
-    $and: [
-      { type: "patient" },
-      { $or: patientScopeFilters },
-    ],
+    type: "patient",
+    $or: patientScopeFilters,
   };
 
   if (nonPatientTypes.length === 0) {
@@ -240,7 +242,7 @@ export async function searchVectorDatabase(
       (patientScope.patientUserId !== null || patientScope.patientProfileId !== null);
 
     if (childResults.length === 0 && hasExplicitPatientScope) {
-      const fallbackTopK = Math.min(Math.max(topK * 4, 100), 400);
+      const fallbackTopK = Math.min(Math.max(topK * 2, 40), 120);
       childResults = await querySimilarDocuments(query, fallbackTopK);
     }
 
@@ -306,39 +308,55 @@ export async function searchVectorDatabase(
     }));
 
     // Enforce retrieval access/type constraints against canonical DB metadata.
-    const documentIds = Array.from(
-      new Set(
-        intermediateResults
-          .map((result) => result.documentId)
-          .filter((id): id is string => typeof id === "string" && id.length > 0)
-      )
-    );
+    let accessFilteredResults = intermediateResults;
+    const skipDbValidation = options?.skipDbValidation === true;
 
-    if (documentIds.length === 0) {
-      return [];
-    }
+    if (!skipDbValidation) {
+      const documentIds = Array.from(
+        new Set(
+          intermediateResults
+            .map((result) => result.documentId)
+            .filter((id): id is string => typeof id === "string" && id.length > 0)
+        )
+      );
 
-    const documents = await prisma.document.findMany({
-      where: { id: { in: documentIds } },
-      select: {
-        id: true,
-        type: true,
-        ragSubtype: true,
-        userId: true,
-      },
-    });
-
-    const documentsById = new Map(documents.map((document) => [document.id, document]));
-    const allowedTypes = new Set<RetrievalDocumentType>(allowedTypeList);
-
-    const accessFilteredResults = intermediateResults.filter((result) => {
-      const document = documentsById.get(result.documentId);
-      if (!document) {
-        return false;
+      if (documentIds.length === 0) {
+        return [];
       }
 
-      return isDocumentAllowed(document, allowedTypes, patientUserId);
-    });
+      const documents = await prisma.document.findMany({
+        where: { id: { in: documentIds } },
+        select: {
+          id: true,
+          type: true,
+          ragSubtype: true,
+          userId: true,
+        },
+      });
+
+      const documentsById = new Map(documents.map((document) => [document.id, document]));
+      const allowedTypes = new Set<RetrievalDocumentType>(allowedTypeList);
+
+      let rejectionReasons: string[] = [];
+      accessFilteredResults = intermediateResults.filter((result) => {
+        const document = documentsById.get(result.documentId);
+        if (!document) {
+          rejectionReasons.push(`${result.documentId}: not found in DB`);
+          return false;
+        }
+        const allowed = isDocumentAllowed(document, allowedTypes, patientUserId);
+        if (!allowed) {
+          rejectionReasons.push(
+            `${result.documentId}: type=${document.type} ragSubtype=${document.ragSubtype} userId=${document.userId} — does not match scope patientUserId=${patientUserId}`
+          );
+        }
+        return allowed;
+      });
+
+      if (rejectionReasons.length > 0) {
+        console.warn("[searchVectorDatabase] DB validation rejections:", rejectionReasons.slice(0, 10));
+      }
+    }
 
     // Filter to only unique parent texts
     const seenTexts = new Set<string>();

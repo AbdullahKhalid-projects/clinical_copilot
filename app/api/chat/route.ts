@@ -48,20 +48,49 @@ const RAG_RETRY_BASE_DELAY_MS = Math.max(
   0,
   Number.parseInt(process.env.RAG_RETRY_BASE_DELAY_MS ?? "250", 10) || 250
 );
+const RAG_UPSTREAM_TIMEOUT_MS = Math.max(
+  10000,
+  Number.parseInt(process.env.RAG_UPSTREAM_TIMEOUT_MS ?? "45000", 10) || 45000
+);
 const STRUCTURED_TOOL_CALLING_ENABLED =
   (process.env.STRUCTURED_TOOL_CALLING_ENABLED ?? "false").toLowerCase() === "true";
 const STRUCTURED_TOOL_DEBUG_LOGS_ENABLED =
   (process.env.STRUCTURED_TOOL_DEBUG_LOGS_ENABLED ?? "true").toLowerCase() === "true";
 const CHAT_DEBUG_LOGS_ENABLED =
   (process.env.CHAT_DEBUG_LOGS_ENABLED ?? "true").toLowerCase() === "true";
-const RAG_MAX_CONTEXT_CHUNKS = 8;
-const RAG_MAX_CHUNK_CHARS = 14000;
-const RAG_MAX_TOTAL_CHARS = 28000;
+const RAG_PRESERVE_THINKING_ENABLED =
+  (process.env.RAG_PRESERVE_THINKING_ENABLED ?? "false").toLowerCase() === "true";
+const SEMANTIC_SEND_REASONING =
+  (process.env.SEMANTIC_SEND_REASONING ?? "false").toLowerCase() === "true";
+const SEMANTIC_MAX_OUTPUT_TOKENS = Math.max(
+  128,
+  Number.parseInt(process.env.SEMANTIC_MAX_OUTPUT_TOKENS ?? "700", 10) || 700
+);
+const SEMANTIC_RETRIEVAL_TOP_K = Math.max(
+  1,
+  Number.parseInt(process.env.SEMANTIC_RETRIEVAL_TOP_K ?? "24", 10) || 24
+);
+const RAG_MAX_CONTEXT_CHUNKS = Math.max(
+  1,
+  Number.parseInt(process.env.RAG_MAX_CONTEXT_CHUNKS ?? "5", 10) || 5
+);
+const RAG_MAX_CHUNK_CHARS = Math.max(
+  400,
+  Number.parseInt(process.env.RAG_MAX_CHUNK_CHARS ?? "1800", 10) || 1800
+);
+const RAG_MAX_TOTAL_CHARS = Math.max(
+  1200,
+  Number.parseInt(process.env.RAG_MAX_TOTAL_CHARS ?? "7000", 10) || 7000
+);
 const STRUCTURED_HISTORY_MAX_ITEMS = 300;
 const TOOL_RESULT_MAX_CHUNKS = 4;
 const TOOL_RESULT_MAX_CHUNK_CHARS = 3200;
 const TOOL_RESULT_MAX_TOTAL_CHARS = 9000;
 const CONVERSATION_CONTEXT_MAX_MESSAGES = 6;
+const CONVERSATION_CONTEXT_MAX_CHARS = Math.max(
+  300,
+  Number.parseInt(process.env.CONVERSATION_CONTEXT_MAX_CHARS ?? "1400", 10) || 1400
+);
 const THINK_OPEN_TAG = "<think>";
 const THINK_CLOSE_TAG = "</think>";
 
@@ -74,6 +103,10 @@ const ragModelProvider = createOpenAI({
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
     const withPreserveThinking = (requestInit: RequestInit | undefined): RequestInit | undefined => {
+      if (!RAG_PRESERVE_THINKING_ENABLED) {
+        return requestInit;
+      }
+
       if (!requestUrl.includes("/chat/completions")) {
         return requestInit;
       }
@@ -115,7 +148,44 @@ const ragModelProvider = createOpenAI({
       }
     };
 
-    const attemptFetch = async () => fetch(input, withPreserveThinking(init));
+    const attemptFetch = async () => {
+      const baseInit = withPreserveThinking(init) ?? {};
+      const timeoutController = new AbortController();
+
+      if (baseInit.signal) {
+        if (baseInit.signal.aborted) {
+          timeoutController.abort();
+        } else {
+          baseInit.signal.addEventListener(
+            "abort",
+            () => timeoutController.abort(),
+            { once: true }
+          );
+        }
+      }
+
+      const timeoutHandle = setTimeout(() => {
+        timeoutController.abort();
+      }, RAG_UPSTREAM_TIMEOUT_MS);
+
+      try {
+        return await fetch(input, {
+          ...baseInit,
+          signal: timeoutController.signal,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          const timeoutError = Object.assign(
+            new Error(`Model upstream timed out after ${RAG_UPSTREAM_TIMEOUT_MS}ms.`),
+            { statusCode: 504 }
+          );
+          throw timeoutError;
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeoutHandle);
+      }
+    };
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     const shouldRetry5xx = (status: number) => [500, 502, 503, 504].includes(status);
 
@@ -311,9 +381,17 @@ function formatChatStreamError(error: unknown): string {
     return "The model endpoint returned an internal error (HTTP 500). Please retry in a few seconds.";
   }
 
+  if (maybeError.statusCode === 504) {
+    return "The model endpoint timed out before completing the response. Please retry with a shorter query or reduced context.";
+  }
+
   const message = typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
   if (message.includes("empty response body")) {
     return "The model endpoint returned an empty response. Please try again.";
+  }
+
+  if (message.includes("timed out") || message.includes("timeout")) {
+    return "The model endpoint timed out before completing the response. Please retry with a shorter query or reduced context.";
   }
 
   return fallback;
@@ -357,7 +435,12 @@ function getConversationContext(messages: UIMessage[]): string {
     })
     .filter((line): line is string => line !== null);
 
-  return recent.join("\n");
+  const combined = recent.join("\n");
+  if (combined.length <= CONVERSATION_CONTEXT_MAX_CHARS) {
+    return combined;
+  }
+
+  return combined.slice(combined.length - CONVERSATION_CONTEXT_MAX_CHARS).trimStart();
 }
 
 type ChatContextPayload = {
@@ -1315,7 +1398,8 @@ export async function POST(request: Request) {
     // Semantic retrieval mode: direct RAG via vector search, no tool-calling.
     if (chatContext.retrievalMode === "semantic") {
       try {
-        const semanticResults = await searchVectorDatabase(latestUserQuery, 50, "all", {
+        const semanticRetrievalStartedAt = Date.now();
+        const semanticResults = await searchVectorDatabase(latestUserQuery, SEMANTIC_RETRIEVAL_TOP_K, "all", {
           includePatientDocuments: true,
           patientUserId,
           patientProfileId: chatContext.patientProfileId ?? null,
@@ -1346,10 +1430,25 @@ export async function POST(request: Request) {
           responseStyle: "concise",
         });
 
+        const retrievalPreview = {
+          mode: "semantic" as const,
+          query: latestUserQuery,
+          semanticMatches: semanticChunks.length,
+          mergedChunkCount: mergedContext.chunks.length,
+          citationCount: mergedContext.citations.length,
+          topDocuments: semanticChunks.slice(0, 5).map((chunk) => ({
+            chunkId: chunk.parentChunkId,
+            title: chunk.documentTitle || "Untitled Source",
+            score: Number(chunk.score.toFixed(4)),
+          })),
+        };
+
         const semanticResult = streamText({
           model: ragModelProvider.chat(RAG_MODEL_NAME),
+          maxOutputTokens: SEMANTIC_MAX_OUTPUT_TOKENS,
           system: [
             SYSTEM_PROMPT,
+            promptPayload.systemPrompt,
             "You are in semantic retrieval mode. Ground every statement in the retrieved document passages.",
             "Cite sources by document title when possible.",
             "If the retrieved passages do not contain relevant information, state that clearly and do not speculate.",
@@ -1359,7 +1458,24 @@ export async function POST(request: Request) {
         });
 
         return semanticResult.toUIMessageStreamResponse({
-          sendReasoning: true,
+          sendReasoning: SEMANTIC_SEND_REASONING,
+          messageMetadata: ({ part }) => {
+            if (part.type === "start") {
+              return {
+                retrieval: retrievalPreview,
+                retrievalStartedAt: Date.now(),
+              };
+            }
+
+            if (part.type === "finish") {
+              return {
+                model: RAG_MODEL_NAME,
+                totalTokens: part.totalUsage.totalTokens,
+                retrievalDurationMs: Date.now() - semanticRetrievalStartedAt,
+                retrieval: retrievalPreview,
+              };
+            }
+          },
           onError: (error) => {
             console.error("AI chat stream failed", { requestId, mode: "semantic-rag", error });
             return formatChatStreamError(error);

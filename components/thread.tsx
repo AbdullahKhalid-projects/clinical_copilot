@@ -51,6 +51,37 @@ type ThreadProps = {
   onToggleRetrievalMode?: () => void;
 };
 
+type RetrievalPreview = {
+  mode?: string;
+  query?: string;
+  semanticMatches?: number;
+  mergedChunkCount?: number;
+  citationCount?: number;
+  topDocuments?: Array<{
+    chunkId?: string;
+    title?: string;
+    score?: number;
+  }>;
+};
+
+function getSemanticRetrievalPreview(metadata: unknown): RetrievalPreview | null {
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const retrieval = (metadata as { retrieval?: unknown }).retrieval;
+  if (!retrieval || typeof retrieval !== "object") {
+    return null;
+  }
+
+  const preview = retrieval as RetrievalPreview;
+  if (preview.mode !== "semantic") {
+    return null;
+  }
+
+  return preview;
+}
+
 export const Thread: FC<ThreadProps> = ({
   patientName = "Patient",
   retrievalMode = "normal",
@@ -307,6 +338,8 @@ const AssistantMessage: FC = () => {
   // for pt-[n] use -mb-[n + 6] & min-h-[n + 6] to preserve compensation
   const ACTION_BAR_PT = "pt-1.5";
   const ACTION_BAR_HEIGHT = `-mb-7.5 min-h-7.5 ${ACTION_BAR_PT}`;
+  const metadata = useAuiState((s) => s.message.metadata as unknown);
+  const retrievalPreview = getSemanticRetrievalPreview(metadata);
 
   return (
     <MessagePrimitive.Root
@@ -325,6 +358,29 @@ const AssistantMessage: FC = () => {
             tools: { Fallback: ToolFallback },
           }}
         />
+        {retrievalPreview && (
+          <div className="mt-3 rounded-lg border border-[#E5D7CD] bg-[#F7F3EE] px-3 py-2 text-xs text-[#6D5751]">
+            <div className="mb-1.5 font-semibold text-[#5B4741]">Retrieved Context</div>
+            <div className="flex flex-wrap items-center gap-3">
+              <span>matches: {retrievalPreview.semanticMatches ?? 0}</span>
+              <span>merged: {retrievalPreview.mergedChunkCount ?? 0}</span>
+              <span>citations: {retrievalPreview.citationCount ?? 0}</span>
+            </div>
+            {retrievalPreview.query ? (
+              <p className="mt-1 truncate text-[11px] text-[#7A625A]">query: {retrievalPreview.query}</p>
+            ) : null}
+            {Array.isArray(retrievalPreview.topDocuments) && retrievalPreview.topDocuments.length > 0 ? (
+              <div className="mt-2 space-y-1">
+                {retrievalPreview.topDocuments.slice(0, 5).map((doc, index) => (
+                  <div key={`${doc.chunkId || doc.title || "doc"}-${index}`} className="flex items-center justify-between gap-2">
+                    <span className="truncate">{doc.title || "Untitled Source"}</span>
+                    <span className="font-mono text-[11px]">{typeof doc.score === "number" ? doc.score : "-"}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        )}
         <MessageError />
       </div>
 
