@@ -1,7 +1,7 @@
 'use server'
 
 import { prisma } from "@/lib/prisma";
-import { currentUser } from "@clerk/nextjs/server";
+import { currentUser, clerkClient } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "crypto";
 
@@ -137,8 +137,7 @@ export async function getDoctorDashboardData() {
   });
 
   if (!dbUser || !dbUser.doctorProfile) {
-    // If working with seed data, might need to be careful if logged in user matches seed
-    return null; 
+    return null;
   }
 
   const doctorProfile = dbUser.doctorProfile;
@@ -148,56 +147,249 @@ export async function getDoctorDashboardData() {
   const todayEnd = new Date();
   todayEnd.setHours(23, 59, 59, 999);
 
-  // Get today's appointments
-  const appointments = await prisma.appointment.findMany({
+  const weekStart = new Date(todayStart);
+  weekStart.setDate(weekStart.getDate() - 7);
+
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+
+  // Parallel queries for dashboard data
+  const [
+    todayAppointments,
+    weekAppointments,
+    distinctPatientsResult,
+    newPatientsThisWeek,
+    inProgressSessions,
+    unlinkedSessions,
+    completedWithoutSoap,
+    recentAppointments,
+  ] = await Promise.all([
+    // 1. Today's appointments with patient info
+    prisma.appointment.findMany({
+      where: {
+        doctorId: doctorProfile.id,
+        patientId: { not: null },
+        date: { gte: todayStart, lte: todayEnd },
+      },
+      include: {
+        patient: { include: { user: true } },
+      },
+      orderBy: { date: 'asc' },
+    }),
+
+    // 2. This week's appointments count
+    prisma.appointment.count({
+      where: {
+        doctorId: doctorProfile.id,
+        patientId: { not: null },
+        date: { gte: weekStart },
+      },
+    }),
+
+    // 3. Total unique patients ever
+    prisma.appointment.findMany({
+      where: {
+        doctorId: doctorProfile.id,
+        patientId: { not: null },
+      },
+      distinct: ['patientId'],
+      select: { patientId: true },
+    }),
+
+    // 4. New patients this week (first appointment in last 7 days)
+    prisma.appointment.groupBy({
+      by: ['patientId'],
+      where: {
+        doctorId: doctorProfile.id,
+        patientId: { not: null },
+        date: { gte: weekStart },
+      },
+      _min: { date: true },
+    }).then(groups =>
+      groups.filter(g => g._min.date && g._min.date >= weekStart).length
+    ),
+
+    // 5. In-progress sessions (need attention)
+    prisma.appointment.findMany({
+      where: {
+        doctorId: doctorProfile.id,
+        status: 'IN_PROGRESS',
+      },
+      include: {
+        patient: { include: { user: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 5,
+    }),
+
+    // 6. Unlinked sessions (no patient assigned)
+    prisma.appointment.findMany({
+      where: {
+        doctorId: doctorProfile.id,
+        status: 'UNLINKED',
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    }),
+
+    // 7. Completed appointments without SOAP notes (filter soapNote in JS to avoid Prisma Json null type issues)
+    prisma.appointment.findMany({
+      where: {
+        doctorId: doctorProfile.id,
+        status: 'COMPLETED',
+        patientId: { not: null },
+      },
+      include: {
+        patient: { include: { user: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 20,
+    }).then(appts => appts.filter(appt => appt.soapNote === null).slice(0, 5)),
+
+    // 8. Recent appointments for "Recent Patients" section (last 10)
+    prisma.appointment.findMany({
+      where: {
+        doctorId: doctorProfile.id,
+        patientId: { not: null },
+        status: { in: ['COMPLETED', 'IN_PROGRESS'] },
+      },
+      include: {
+        patient: { include: { user: true } },
+      },
+      orderBy: { date: 'desc' },
+      take: 10,
+    }),
+  ]);
+
+  // Deduplicate recent patients by patientId, keep most recent
+  const seenPatientIds = new Set<string>();
+  const recentPatients = recentAppointments
+    .filter(appt => {
+      if (!appt.patientId || seenPatientIds.has(appt.patientId)) return false;
+      seenPatientIds.add(appt.patientId);
+      return true;
+    })
+    .slice(0, 5)
+    .map(appt => {
+      const patientName = appt.patient?.user.name || "Unknown Patient";
+      return {
+        id: appt.patientId!,
+        name: patientName,
+        initials: patientName.split(" ").map(n => n[0]).join("").substring(0, 2),
+        lastVisit: appt.date.toLocaleDateString(),
+        condition: appt.reason || "General Consultation",
+      };
+    });
+
+  const totalAppointmentsToday = todayAppointments.length;
+  const distinctPatients = distinctPatientsResult.length;
+
+  // Action items
+  const actionItems = [
+    ...inProgressSessions.map(appt => {
+      const patientName = appt.patient?.user.name || "Unknown Patient";
+      return {
+        id: appt.id,
+        type: 'IN_PROGRESS' as const,
+        title: `Session in progress with ${patientName}`,
+        subtitle: `Started ${appt.date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        patientId: appt.patientId ?? undefined,
+        appointmentId: appt.id,
+      };
+    }),
+    ...unlinkedSessions.map(appt => ({
+      id: appt.id,
+      type: 'UNLINKED' as const,
+      title: 'Unlinked session needs patient',
+      subtitle: `Created ${appt.createdAt.toLocaleDateString()}`,
+      appointmentId: appt.id,
+    })),
+    ...completedWithoutSoap.map(appt => {
+      const patientName = appt.patient?.user.name || "Unknown Patient";
+      return {
+        id: appt.id,
+        type: 'MISSING_NOTES' as const,
+        title: `SOAP notes missing for ${patientName}`,
+        subtitle: `Completed ${appt.date.toLocaleDateString()}`,
+        patientId: appt.patientId ?? undefined,
+        appointmentId: appt.id,
+      };
+    }),
+  ].slice(0, 6);
+
+  const pendingNotesCount = inProgressSessions.length + completedWithoutSoap.length;
+
+  // Fetch all patients from the database (not just this doctor's)
+  const allPatientsRaw = await prisma.patientProfile.findMany({
     where: {
-      doctorId: doctorProfile.id,
-      patientId: { not: null },
-      date: {
-        gte: todayStart,
-        lte: todayEnd,
+      user: {
+        role: "PATIENT",
       },
     },
     include: {
-      patient: {
-        include: {
-            user: true
-        }
+      user: {
+        select: {
+          name: true,
+          clerkId: true,
+          email: true,
+        },
+      },
+      appointments: {
+        orderBy: { date: "desc" },
+        take: 1,
       },
     },
     orderBy: {
-      date: 'asc',
+      user: {
+        name: "asc",
+      },
     },
+    take: 10,
   });
 
-  // Get Quick Stats
-  // 1. Total appointments today
-  const totalAppointmentsToday = appointments.length;
+  // Fetch Clerk images for all patients in parallel
+  const clerk = await clerkClient();
+  const clerkUsers = await Promise.all(
+    allPatientsRaw.map(async (p) => {
+      try {
+        const user = await clerk.users.getUser(p.user.clerkId);
+        return { clerkId: p.user.clerkId, imageUrl: user.imageUrl };
+      } catch {
+        return { clerkId: p.user.clerkId, imageUrl: null };
+      }
+    })
+  );
+  const imageUrlMap = new Map(clerkUsers.map((u) => [u.clerkId, u.imageUrl]));
 
-  // 2. Total unique patients for this doctor (ever)
-  // Use aggregation or distinct count
-  const distinctPatients = await prisma.appointment.findMany({
-    where: {
-      doctorId: doctorProfile.id,
-      patientId: { not: null },
-    },
-    distinct: ['patientId'],
-    select: { patientId: true }
+  const allPatients = allPatientsRaw.map((patient) => {
+    const name = patient.user.name || "Unknown";
+    const lastAppt = patient.appointments[0];
+    return {
+      id: patient.id,
+      name,
+      imageUrl: imageUrlMap.get(patient.user.clerkId) || null,
+      initials: name.split(" ").map((n: string) => n[0]).join("").substring(0, 2),
+      lastVisit: lastAppt?.date.toLocaleDateString() || "Never",
+      condition: patient.conditions ? patient.conditions.split(",")[0] : "General",
+    };
   });
-  
+
   return {
     doctor: {
       name: dbUser.name || "Dr. Unknown",
       specialty: doctorProfile.specialization,
-      title: "MD", 
+      title: "MD",
       initials: (dbUser.name || "D").split(' ').map((n) => n[0]).join('').substring(0, 2),
-      licenseNumber: "LIC-123456" 
+      licenseNumber: "LIC-123456"
     },
-    todaysOverview: {
-        appointments: totalAppointmentsToday,
-        totalPatients: distinctPatients.length,
+    stats: {
+      todayAppointments: totalAppointmentsToday,
+      totalPatients: distinctPatients,
+      weeklySessions: weekAppointments,
+      newPatientsThisWeek: newPatientsThisWeek,
+      pendingNotes: pendingNotesCount,
     },
-    appointments: appointments
+    appointments: todayAppointments
       .filter((appt) => appt.patientId && appt.patient)
       .map((appt) => {
         const patientName = appt.patient?.user.name || "Unknown Patient";
@@ -218,7 +410,10 @@ export async function getDoctorDashboardData() {
           type: appt.reason || "General Consultation",
           status: String(appt.status),
         };
-      })
+      }),
+    recentPatients,
+    allPatients,
+    actionItems,
   };
 }
 
@@ -371,7 +566,51 @@ export async function getPatientProfile(patientProfileId: string) {
   };
 }
 
+export async function getAllPatients() {
+  try {
+    const clerkUser = await currentUser();
+    if (!clerkUser) throw new Error("Unauthorized");
+
+    const patients = await prisma.patientProfile.findMany({
+      where: {
+        user: {
+          role: "PATIENT",
+        },
+      },
+      include: {
+        user: true,
+        appointments: {
+          orderBy: { date: "desc" },
+          take: 1,
+        },
+      },
+      orderBy: {
+        user: {
+          name: "asc",
+        },
+      },
+      take: 10,
+    });
+
+    return patients.map((patient) => {
+      const name = patient.user.name || "Unknown";
+      const lastAppt = patient.appointments[0];
+      return {
+        id: patient.id,
+        name,
+        initials: name.split(" ").map((n: string) => n[0]).join("").substring(0, 2),
+        lastVisit: lastAppt?.date.toLocaleDateString() || "Never",
+        condition: patient.conditions ? patient.conditions.split(",")[0] : "General",
+      };
+    });
+  } catch (error) {
+    console.error("Error fetching all patients:", error);
+    return [];
+  }
+}
+
 export async function getDoctorSchedule(dateStr?: string) {
+
   const clerkUser = await currentUser();
   if (!clerkUser) throw new Error("Unauthorized");
 

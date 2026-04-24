@@ -18,7 +18,7 @@ export default async function DoctorDashboardPage() {
        );
     }
     
-    return <DashboardClient initialData={data} />;
+    return <DashboardClient initialData={data} allPatients={data.allPatients} />;
   } catch (error) {
     // If it's an authorization error or other
     console.error("Dashboard error:", error);
