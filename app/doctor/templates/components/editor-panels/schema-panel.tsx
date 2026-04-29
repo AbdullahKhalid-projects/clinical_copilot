@@ -104,7 +104,7 @@ export function SchemaPanel({
 
         <div className="space-y-3">
           {template.bodySchema.fields.map((field, index) => (
-            <div key={`${field.key}-${index}`} className="rounded-lg border p-3">
+            <div key={`field-row-${index}`} className="rounded-lg border p-3">
               <div className="grid gap-3 md:grid-cols-12">
                 <div className="space-y-1 md:col-span-3">
                   <label className="text-xs text-muted-foreground">Key</label>

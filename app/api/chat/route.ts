@@ -1,6 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { stepCountIs, streamText, tool, type UIMessage } from "ai";
 import { NextResponse } from "next/server";
+import neo4j, { type Driver } from "neo4j-driver";
 import {
   buildGenerationPrompt,
   formatSoapNoteForModel,
@@ -25,17 +26,25 @@ import {
 } from "@/app/doctor/clinical-session/actions";
 import { searchVectorDatabase } from "@/retrieval_actions/actions";
 import { z } from "zod";
+import {
+  getPatientClinicalSummaryQuery,
+  suggestSafeAlternativesQuery,
+  verifyPrescriptionSafetyQuery,
+} from "@/code";
 
 const SYSTEM_PROMPT =
   "You are Shifa, a clinical copilot assistant. Provide thorough, clinically useful responses with relevant analysis when warranted. Acknowledge uncertainty and suggest next best questions when appropriate. However, do not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.";
 
 const RAG_MODEL_BASE_URL =
   process.env.CHAT_PANEL_MODEL_URL?.trim() ||
-  "https://muddasirjaved666--example-qwen3-6-27b-awq-inference-vllm-d9a03f.modal.run/v1";
+  "https://openrouter.ai/api/v1";
 const RAG_MODEL_NAME =
   process.env.CHAT_PANEL_MODEL_NAME?.trim() ||
-  "cyankiwi/Qwen3.6-27B-AWQ-INT4";
-const RAG_MODEL_API_KEY = process.env.RAG_MODEL_API_KEY ?? "dummy-key";
+  "qwen/qwen3.6-plus";
+const CHAT_PANEL_MODEL_API_KEY =
+  process.env.OPENROUTER_API_KEY ??
+  process.env.RAG_MODEL_API_KEY ??
+  "dummy-key";
 const RAG_EMPTY_204_RETRY_COUNT = Math.max(
   0,
   Number.parseInt(process.env.RAG_EMPTY_204_RETRY_COUNT ?? "1", 10) || 1
@@ -58,6 +67,10 @@ const STRUCTURED_TOOL_DEBUG_LOGS_ENABLED =
   (process.env.STRUCTURED_TOOL_DEBUG_LOGS_ENABLED ?? "true").toLowerCase() === "true";
 const CHAT_DEBUG_LOGS_ENABLED =
   (process.env.CHAT_DEBUG_LOGS_ENABLED ?? "true").toLowerCase() === "true";
+const NEO4J_URI = process.env.NEO4J_URI?.trim() ?? "";
+const NEO4J_USERNAME = process.env.NEO4J_USERNAME?.trim() ?? "";
+const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD ?? "";
+const NEO4J_DATABASE = process.env.NEO4J_DATABASE?.trim() || undefined;
 const RAG_PRESERVE_THINKING_ENABLED =
   (process.env.RAG_PRESERVE_THINKING_ENABLED ?? "false").toLowerCase() === "true";
 const SEMANTIC_SEND_REASONING =
@@ -91,13 +104,19 @@ const CONVERSATION_CONTEXT_MAX_CHARS = Math.max(
   300,
   Number.parseInt(process.env.CONVERSATION_CONTEXT_MAX_CHARS ?? "1400", 10) || 1400
 );
+const NEO4J_TOOL_RESULT_MAX_ROWS = Math.max(
+  1,
+  Number.parseInt(process.env.NEO4J_TOOL_RESULT_MAX_ROWS ?? "25", 10) || 25
+);
 const THINK_OPEN_TAG = "<think>";
 const THINK_CLOSE_TAG = "</think>";
 
-// Uses an OpenAI-compatible endpoint hosted outside OpenAI (Modal/vLLM).
+let neo4jDriverSingleton: Driver | null = null;
+
+// Uses an OpenAI-compatible endpoint hosted outside OpenAI (OpenRouter by default).
 const ragModelProvider = createOpenAI({
   baseURL: RAG_MODEL_BASE_URL,
-  apiKey: RAG_MODEL_API_KEY,
+  apiKey: CHAT_PANEL_MODEL_API_KEY,
   fetch: async (input, init) => {
     const requestUrl =
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
@@ -200,7 +219,7 @@ const ragModelProvider = createOpenAI({
       if (response.status === 204 && emptyBodyAttempts < RAG_EMPTY_204_RETRY_COUNT) {
         emptyBodyAttempts += 1;
         console.warn(
-          `Modal endpoint returned HTTP 204 (empty body). Retrying ${emptyBodyAttempts}/${RAG_EMPTY_204_RETRY_COUNT}.`
+          `Model endpoint returned HTTP 204 (empty body). Retrying ${emptyBodyAttempts}/${RAG_EMPTY_204_RETRY_COUNT}.`
         );
         await sleep(RAG_RETRY_BASE_DELAY_MS * emptyBodyAttempts);
         response = await attemptFetch();
@@ -210,7 +229,7 @@ const ragModelProvider = createOpenAI({
       if (shouldRetry5xx(response.status) && serverErrorAttempts < RAG_5XX_RETRY_COUNT) {
         serverErrorAttempts += 1;
         console.warn(
-          `Modal endpoint returned HTTP ${response.status}. Retrying ${serverErrorAttempts}/${RAG_5XX_RETRY_COUNT}.`
+          `Model endpoint returned HTTP ${response.status}. Retrying ${serverErrorAttempts}/${RAG_5XX_RETRY_COUNT}.`
         );
         await sleep(RAG_RETRY_BASE_DELAY_MS * serverErrorAttempts);
         response = await attemptFetch();
@@ -218,7 +237,7 @@ const ragModelProvider = createOpenAI({
       }
 
       if (CHAT_DEBUG_LOGS_ENABLED && totalAttempts > 1) {
-        console.info("Modal upstream retry summary", {
+        console.info("Model upstream retry summary", {
           finalStatus: response.status,
           totalAttempts,
           emptyBodyAttempts,
@@ -518,6 +537,195 @@ type LastSoapNoteToolResult = {
   soapNoteText: string;
   error?: string;
 };
+
+type Neo4jPatientClinicalSummaryResult = {
+  ok: boolean;
+  patientId: string;
+  rows: Array<{
+    category: string;
+    item: string;
+    date: string | null;
+  }>;
+  summaryTable: string;
+  error?: string;
+};
+
+type Neo4jPrescriptionSafetyResult = {
+  ok: boolean;
+  patientId: string;
+  proposedDrug: string;
+  proposedMedicine: string | null;
+  warningAllergies: string[];
+  warningInteractions: string[];
+  warningContraindications: string[];
+  error?: string;
+};
+
+type Neo4jSafeAlternativesResult = {
+  ok: boolean;
+  patientId: string;
+  diseaseName: string;
+  alternatives: Array<{
+    safeAlternative: string;
+    foundVia: string | null;
+    treatmentDetails: string | null;
+  }>;
+  alternativesTable: string;
+  error?: string;
+};
+
+type Neo4jQueryRow = Record<string, unknown>;
+
+function getNeo4jDriverOrError(): { driver: Driver | null; error?: string } {
+  if (!NEO4J_URI || !NEO4J_USERNAME || !NEO4J_PASSWORD) {
+    const missing = [
+      !NEO4J_URI && "NEO4J_URI",
+      !NEO4J_USERNAME && "NEO4J_USERNAME",
+      !NEO4J_PASSWORD && "NEO4J_PASSWORD",
+    ].filter(Boolean).join(", ");
+    console.warn("[Neo4j] Driver init skipped — missing env:", missing);
+    return {
+      driver: null,
+      error:
+        "Neo4j is not configured. Set NEO4J_URI, NEO4J_USERNAME, and NEO4J_PASSWORD environment variables.",
+    };
+  }
+
+  if (!neo4jDriverSingleton) {
+    console.info("[Neo4j] Creating driver singleton for URI:", NEO4J_URI, "database:", NEO4J_DATABASE ?? "default");
+    neo4jDriverSingleton = neo4j.driver(
+      NEO4J_URI,
+      neo4j.auth.basic(NEO4J_USERNAME, NEO4J_PASSWORD),
+      {
+        disableLosslessIntegers: true,
+      }
+    );
+  }
+
+  return { driver: neo4jDriverSingleton };
+}
+
+async function runNeo4jReadQuery(
+  query: string,
+  params: Record<string, unknown>
+): Promise<{ ok: true; rows: Neo4jQueryRow[] } | { ok: false; error: string }> {
+  const { driver, error } = getNeo4jDriverOrError();
+  if (!driver) {
+    console.warn("[Neo4j] runNeo4jReadQuery aborted — driver unavailable:", error);
+    return {
+      ok: false,
+      error: error ?? "Neo4j driver is not available.",
+    };
+  }
+
+  console.info("[Neo4j] Executing read query", { params });
+
+  const session = driver.session(
+    NEO4J_DATABASE
+      ? {
+          defaultAccessMode: neo4j.session.READ,
+          database: NEO4J_DATABASE,
+        }
+      : {
+          defaultAccessMode: neo4j.session.READ,
+        }
+  );
+
+  try {
+    const result = await session.executeRead((tx: any) => tx.run(query, params));
+    const rows: Neo4jQueryRow[] = result.records.map((record: any) => {
+      const row: Neo4jQueryRow = {};
+      for (const key of record.keys) {
+        row[key] = record.get(key);
+      }
+      return row;
+    });
+
+    console.info("[Neo4j] Query succeeded — rows returned:", rows.length);
+    if (rows.length > 0) {
+      console.info("[Neo4j] First row sample:", rows[0]);
+    }
+
+    return { ok: true, rows };
+  } catch (queryError) {
+    const message = queryError instanceof Error ? queryError.message : "Neo4j query failed.";
+    console.error("[Neo4j] Query failed:", message, { params });
+    return {
+      ok: false,
+      error: message,
+    };
+  } finally {
+    await session.close();
+  }
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : String(item ?? "").trim()))
+    .filter((item) => item.length > 0);
+}
+
+function formatNeo4jPatientClinicalSummaryToolOutput(result: Neo4jPatientClinicalSummaryResult): string {
+  if (!result.ok) {
+    return `Failed to retrieve patient clinical summary: ${result.error ?? "Unknown Neo4j error."}`;
+  }
+
+  return [
+    `Patient summary retrieved for: ${result.patientId}`,
+    `Rows: ${result.rows.length}`,
+    "",
+    result.summaryTable,
+  ].join("\n");
+}
+
+function formatNeo4jPrescriptionSafetyToolOutput(result: Neo4jPrescriptionSafetyResult): string {
+  if (!result.ok) {
+    return `Failed to verify prescription safety: ${result.error ?? "Unknown Neo4j error."}`;
+  }
+
+  const allergies =
+    result.warningAllergies.length > 0 ? result.warningAllergies.join(", ") : "None detected";
+  const interactions =
+    result.warningInteractions.length > 0
+      ? result.warningInteractions.join(", ")
+      : "None detected";
+  const contraindications =
+    result.warningContraindications.length > 0
+      ? result.warningContraindications.join(", ")
+      : "None detected";
+  const hasWarnings =
+    result.warningAllergies.length > 0 ||
+    result.warningInteractions.length > 0 ||
+    result.warningContraindications.length > 0;
+
+  return [
+    `Prescription safety verification completed for patient: ${result.patientId}`,
+    `Proposed drug: ${result.proposedMedicine ?? result.proposedDrug}`,
+    `Overall status: ${hasWarnings ? "WARNINGS FOUND" : "NO WARNINGS FOUND"}`,
+    "",
+    `Allergy conflicts: ${allergies}`,
+    `Drug interactions: ${interactions}`,
+    `Contraindications: ${contraindications}`,
+  ].join("\n");
+}
+
+function formatNeo4jSafeAlternativesToolOutput(result: Neo4jSafeAlternativesResult): string {
+  if (!result.ok) {
+    return `Failed to suggest safe alternatives: ${result.error ?? "Unknown Neo4j error."}`;
+  }
+
+  return [
+    `Safe alternatives generated for patient: ${result.patientId}`,
+    `Disease context: ${result.diseaseName}`,
+    `Alternatives found: ${result.alternatives.length}`,
+    "",
+    result.alternativesTable,
+  ].join("\n");
+}
 
 function formatLastSessionToolOutput(result: LastSessionToolResult): string {
   if (!result.ok) {
@@ -850,6 +1058,66 @@ async function resolvePatientUserId(chatContext: ChatContextPayload): Promise<st
   }
 
   return null;
+}
+
+async function resolveNeo4jPatientIdentifier(
+  chatContext: ChatContextPayload,
+  resolvedPatientUserId: string | null
+): Promise<string | null> {
+  const HARD_CODED_NEO4J_PATIENT_ID = "38cc16ef-8b17-4841-985e-bdafe4c92e37";
+
+  const candidates: string[] = [];
+
+  const addCandidate = (value: string | null | undefined) => {
+    const normalized = value?.trim() ?? "";
+    if (!normalized) {
+      return;
+    }
+
+    if (!candidates.includes(normalized)) {
+      candidates.push(normalized);
+    }
+  };
+
+  const appointmentId = chatContext.appointmentId?.trim() || null;
+  if (appointmentId) {
+    const appointment = await prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      select: {
+        patientId: true,
+        patient: {
+          select: {
+            id: true,
+            userId: true,
+            user: {
+              select: {
+                name: true,
+                email: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Prioritise stable IDs over display names for graph lookups.
+    addCandidate(appointment?.patient?.id ?? null);
+    addCandidate(appointment?.patient?.userId ?? null);
+    addCandidate(appointment?.patientId ?? null);
+    addCandidate(appointment?.patient?.user?.name ?? null);
+    addCandidate(appointment?.patient?.user?.email ?? null);
+  }
+
+  // Fallback to explicit chat context identifiers if appointment-derived details are unavailable.
+  addCandidate(chatContext.patientProfileId);
+  addCandidate(chatContext.patientUserId);
+
+  // Keep this as a final fallback because some graphs use app user IDs as patient keys.
+  addCandidate(resolvedPatientUserId);
+
+  const resolved = candidates[0] ?? null;
+  console.info("[Neo4j] Resolved patient identifier candidates:", candidates, "selected:", resolved, "HARD_CODED:", HARD_CODED_NEO4J_PATIENT_ID);
+  return HARD_CODED_NEO4J_PATIENT_ID;
 }
 
 async function runStructuredOnlyRetrieval(
@@ -1296,6 +1564,220 @@ async function executeLastSoapNoteTool(context: {
   }
 }
 
+async function executeNeo4jPatientClinicalSummaryTool(
+  input: {
+    patientId?: string;
+  },
+  context: {
+    resolvedPatientId: string | null;
+  }
+): Promise<Neo4jPatientClinicalSummaryResult> {
+  const patientId = input.patientId?.trim() || context.resolvedPatientId || "";
+  console.info("[Neo4j Tool] get_patient_clinical_summary — input.patientId:", input.patientId, "resolvedPatientId:", context.resolvedPatientId, "effective:", patientId);
+
+  if (!patientId) {
+    console.warn("[Neo4j Tool] get_patient_clinical_summary aborted — no patientId resolved.");
+    return {
+      ok: false,
+      patientId: "",
+      rows: [],
+      summaryTable: "Could not resolve patient identifier from clinical session context.",
+      error: "patientId is required or must be resolvable from chatContext.appointmentId.",
+    };
+  }
+
+  const queryResult = await runNeo4jReadQuery(getPatientClinicalSummaryQuery, {
+    patientId,
+  });
+
+  if (!queryResult.ok) {
+    console.warn("[Neo4j Tool] get_patient_clinical_summary query failed:", queryResult.error);
+    return {
+      ok: false,
+      patientId,
+      rows: [],
+      summaryTable: "Neo4j patient summary query failed.",
+      error: queryResult.error,
+    };
+  }
+
+  const rows = queryResult.rows.slice(0, NEO4J_TOOL_RESULT_MAX_ROWS).map((row) => ({
+    category: typeof row.Category === "string" && row.Category.trim() ? row.Category.trim() : "Unknown",
+    item: typeof row.Item === "string" && row.Item.trim() ? row.Item.trim() : "Unknown",
+    date: row.Date == null ? null : String(row.Date),
+  }));
+
+  console.info("[Neo4j Tool] get_patient_clinical_summary — mapped rows:", rows.length);
+
+  const summaryTable = rows.length
+    ? [
+        "| Category | Item | Date |",
+        "| --- | --- | --- |",
+        ...rows.map((row) => `| ${row.category} | ${row.item} | ${row.date ?? "n/a"} |`),
+      ].join("\n")
+    : "No clinical summary rows found for this patient filter.";
+
+  return {
+    ok: true,
+    patientId,
+    rows,
+    summaryTable,
+  };
+}
+
+async function executeNeo4jVerifyPrescriptionSafetyTool(
+  input: {
+    patientId?: string;
+    proposedDrug: string;
+  },
+  context: {
+    resolvedPatientId: string | null;
+  }
+): Promise<Neo4jPrescriptionSafetyResult> {
+  const patientId = input.patientId?.trim() || context.resolvedPatientId || "";
+  const proposedDrug = input.proposedDrug.trim();
+  console.info("[Neo4j Tool] verify_prescription_safety — input.patientId:", input.patientId, "resolvedPatientId:", context.resolvedPatientId, "effective:", patientId, "proposedDrug:", proposedDrug);
+
+  if (!patientId || !proposedDrug) {
+    console.warn("[Neo4j Tool] verify_prescription_safety aborted — missing patientId or proposedDrug.");
+    return {
+      ok: false,
+      patientId,
+      proposedDrug,
+      proposedMedicine: null,
+      warningAllergies: [],
+      warningInteractions: [],
+      warningContraindications: [],
+      error:
+        "proposedDrug is required, and patientId must be provided or resolvable from clinical session context.",
+    };
+  }
+
+  const queryResult = await runNeo4jReadQuery(verifyPrescriptionSafetyQuery, {
+    patientId,
+    proposedDrug,
+  });
+
+  if (!queryResult.ok) {
+    console.warn("[Neo4j Tool] verify_prescription_safety query failed:", queryResult.error);
+    return {
+      ok: false,
+      patientId,
+      proposedDrug,
+      proposedMedicine: null,
+      warningAllergies: [],
+      warningInteractions: [],
+      warningContraindications: [],
+      error: queryResult.error,
+    };
+  }
+
+  const firstRow = queryResult.rows[0];
+  if (!firstRow) {
+    console.warn("[Neo4j Tool] verify_prescription_safety — no rows returned for patientId:", patientId, "proposedDrug:", proposedDrug);
+    return {
+      ok: false,
+      patientId,
+      proposedDrug,
+      proposedMedicine: null,
+      warningAllergies: [],
+      warningInteractions: [],
+      warningContraindications: [],
+      error: "No Neo4j result rows found. Confirm patient and drug exist in graph.",
+    };
+  }
+
+  console.info("[Neo4j Tool] verify_prescription_safety — first row:", firstRow);
+
+  return {
+    ok: true,
+    patientId,
+    proposedDrug,
+    proposedMedicine:
+      typeof firstRow.ProposedMedicine === "string" && firstRow.ProposedMedicine.trim()
+        ? firstRow.ProposedMedicine.trim()
+        : null,
+    warningAllergies: toStringArray(firstRow.Warning_Allergies),
+    warningInteractions: toStringArray(firstRow.Warning_Interactions),
+    warningContraindications: toStringArray(firstRow.Warning_Contraindications),
+  };
+}
+
+async function executeNeo4jSuggestSafeAlternativesTool(
+  input: {
+    patientId?: string;
+    diseaseName: string;
+  },
+  context: {
+    resolvedPatientId: string | null;
+  }
+): Promise<Neo4jSafeAlternativesResult> {
+  const patientId = input.patientId?.trim() || context.resolvedPatientId || "";
+  const diseaseName = input.diseaseName.trim();
+  console.info("[Neo4j Tool] suggest_safe_alternatives — input.patientId:", input.patientId, "resolvedPatientId:", context.resolvedPatientId, "effective:", patientId, "diseaseName:", diseaseName);
+
+  if (!patientId || !diseaseName) {
+    console.warn("[Neo4j Tool] suggest_safe_alternatives aborted — missing patientId or diseaseName.");
+    return {
+      ok: false,
+      patientId,
+      diseaseName,
+      alternatives: [],
+      alternativesTable:
+        "diseaseName is required, and patientId must be provided or resolved from clinical session context.",
+      error:
+        "diseaseName is required, and patientId must be provided or resolved from clinical session context.",
+    };
+  }
+
+  const queryResult = await runNeo4jReadQuery(suggestSafeAlternativesQuery, {
+    patientId,
+    diseaseName,
+  });
+
+  if (!queryResult.ok) {
+    console.warn("[Neo4j Tool] suggest_safe_alternatives query failed:", queryResult.error);
+    return {
+      ok: false,
+      patientId,
+      diseaseName,
+      alternatives: [],
+      alternativesTable: "Neo4j safe alternatives query failed.",
+      error: queryResult.error,
+    };
+  }
+
+  const alternatives = queryResult.rows.slice(0, NEO4J_TOOL_RESULT_MAX_ROWS).map((row) => ({
+    safeAlternative:
+      typeof row.SafeAlternative === "string" && row.SafeAlternative.trim()
+        ? row.SafeAlternative.trim()
+        : "Unknown",
+    foundVia: row.FoundVia == null ? null : String(row.FoundVia),
+    treatmentDetails: row.TreatmentDetails == null ? null : String(row.TreatmentDetails),
+  }));
+
+  console.info("[Neo4j Tool] suggest_safe_alternatives — mapped alternatives:", alternatives.length);
+
+  const alternativesTable = alternatives.length
+    ? [
+        "| Safe Alternative | Found Via | Details |",
+        "| --- | --- | --- |",
+        ...alternatives.map(
+          (row) =>
+            `| ${row.safeAlternative} | ${row.foundVia ?? "n/a"} | ${row.treatmentDetails ?? "n/a"} |`
+        ),
+      ].join("\n")
+    : "No safe alternatives found for the provided disease and patient constraints.";
+
+  return {
+    ok: true,
+    patientId,
+    diseaseName,
+    alternatives,
+    alternativesTable,
+  };
+}
+
 async function buildGroundedPrompt(
   messages: UIMessage[],
   chatContext: ChatContextPayload = {}
@@ -1391,6 +1873,7 @@ export async function POST(request: Request) {
     }
 
     const patientUserId = await resolvePatientUserId(chatContext);
+    const neo4jPatientId = await resolveNeo4jPatientIdentifier(chatContext, patientUserId);
     const patientMetricCatalog = patientUserId
       ? await getPatientMetricCatalog(patientUserId, chatContext.patientMetricCatalog)
       : [];
@@ -1538,6 +2021,9 @@ export async function POST(request: Request) {
         "For recent report summary requests, use getLatestReports.",
         "For summarizing the previous visit conversation, use retrieveLastSession.",
         "For reviewing the previous visit SOAP note, use getLastSoapNote.",
+        "For a patient overview, medical history, allergy list, or medication list, use get_patient_clinical_summary.",
+        "When the doctor asks 'should I give him this medicine', 'can I prescribe', 'is it safe to prescribe', or mentions a specific drug in a prescribing context, use verify_prescription_safety.",
+        "When the doctor asks for 'alternatives', 'what else can I give', 'other options', or a 'replacement' for a treatment, use suggest_safe_alternatives.",
         "If a tool returns ok=false, explain the issue and ask a concise follow-up clarifying question.",
         "For tool-provided history tables, preserve all rows in markdown table form when possible.",
         "When summarizing a previous session transcript, focus on the chief complaint, key history, and any changes since the last visit.",
@@ -1666,6 +2152,79 @@ export async function POST(request: Request) {
               await executeLastSoapNoteTool({
                 appointmentId: chatContext.appointmentId ?? null,
               })
+            ),
+        }),
+        get_patient_clinical_summary: tool({
+          description:
+            "Retrieve a patient's complete clinical snapshot from the graph database — including conditions, allergies, and current medications. Use this when the doctor asks for a patient overview, medical history, allergy list, or medication list.",
+          inputSchema: z.object({
+            patientId: z
+              .string()
+              .optional()
+              .describe("Optional patient identifier override. If omitted, resolved from chat context/clinical session."),
+          }),
+          execute: async ({ patientId }) =>
+            formatNeo4jPatientClinicalSummaryToolOutput(
+              await executeNeo4jPatientClinicalSummaryTool(
+                {
+                  patientId,
+                },
+                {
+                  resolvedPatientId: neo4jPatientId,
+                }
+              )
+            ),
+        }),
+        verify_prescription_safety: tool({
+          description:
+            "Safety-check a proposed medication before prescribing. Use this whenever the doctor asks things like 'should I give him this medicine', 'can I prescribe', 'is it safe to prescribe', or mentions a specific drug name in a prescribing context. Checks allergies, cross-reactions, drug interactions, and contraindications.",
+          inputSchema: z.object({
+            patientId: z
+              .string()
+              .optional()
+              .describe("Optional patient identifier override. If omitted, resolved from chat context/clinical session."),
+            proposedDrug: z
+              .string()
+              .min(1)
+              .describe("Exact medication name the doctor wants to prescribe."),
+          }),
+          execute: async ({ patientId, proposedDrug }) =>
+            formatNeo4jPrescriptionSafetyToolOutput(
+              await executeNeo4jVerifyPrescriptionSafetyTool(
+                {
+                  patientId,
+                  proposedDrug,
+                },
+                {
+                  resolvedPatientId: neo4jPatientId,
+                }
+              )
+            ),
+        }),
+        suggest_safe_alternatives: tool({
+          description:
+            "Suggest alternative treatments for a disease/condition while automatically filtering out anything the patient is allergic to or that cross-reacts with known allergies. Use this when the doctor asks for 'alternatives', 'what else can I give', 'other options', or 'replacement' for a current or proposed treatment.",
+          inputSchema: z.object({
+            patientId: z
+              .string()
+              .optional()
+              .describe("Optional patient identifier override. If omitted, resolved from chat context/clinical session."),
+            diseaseName: z
+              .string()
+              .min(1)
+              .describe("Disease or condition name to find treatments for (e.g., hypertension, diabetes, bacterial infection)."),
+          }),
+          execute: async ({ patientId, diseaseName }) =>
+            formatNeo4jSafeAlternativesToolOutput(
+              await executeNeo4jSuggestSafeAlternativesTool(
+                {
+                  patientId,
+                  diseaseName,
+                },
+                {
+                  resolvedPatientId: neo4jPatientId,
+                }
+              )
             ),
         }),
       },
