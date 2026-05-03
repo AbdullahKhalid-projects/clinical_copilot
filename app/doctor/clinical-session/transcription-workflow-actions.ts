@@ -21,7 +21,7 @@ function formatTranscriptionError(error: unknown, endpointUrl: string) {
 
   const causeCode = (error as any)?.cause?.code;
   if (causeCode === "ECONNREFUSED" || /fetch failed/i.test(error.message)) {
-    return `Could not reach Python backend at ${endpointUrl}. Start the FastAPI service and verify PYTHON_BACKEND_URL.`;
+    return `Could not reach Modal backend at ${endpointUrl}. Verify PYTHON_BACKEND_URL is set to your deployed Modal URL.`;
   }
 
   return error.message || fallback;
@@ -171,7 +171,7 @@ export async function confirmAndSaveAppointmentTranscription(appointmentId: stri
     const message = formatTranscriptionError(error, endpointUrl);
 
     if (isConnectivityError(error)) {
-      console.warn("confirmAndSaveAppointmentTranscription connectivity issue", {
+      console.warn("confirmAndSaveAppointmentTranscription Modal connectivity issue", {
         endpointUrl,
         message,
       });

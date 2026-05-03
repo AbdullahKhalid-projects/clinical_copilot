@@ -22,10 +22,20 @@ export type SidebarAppointment = {
 }
 
 export async function getSidebarAppointments() {
-  const user = await currentUser()
+  let user
+  try {
+    user = await currentUser()
+  } catch {
+    return { upcoming: [], past: [] }
+  }
   if (!user) return { upcoming: [], past: [] }
 
-  const clerk = await clerkClient()
+  let clerk
+  try {
+    clerk = await clerkClient()
+  } catch {
+    return { upcoming: [], past: [] }
+  }
 
   const dbUser = await prisma.user.findUnique({
     where: { clerkId: user.id },

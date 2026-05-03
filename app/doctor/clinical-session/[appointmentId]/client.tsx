@@ -40,7 +40,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useUploadThing } from "@/lib/uploadthing";
 import { useToast } from "@/hooks/use-toast";
-import { useClinicalWebSocket, type TranscriptSegment } from "@/hooks/use-clinical-websocket";
+import { useSmartChunker, type TranscriptSegment } from "@/hooks/use-smart-chunker";
 import { SessionTabs, type ClinicalSessionTab } from "./components/session-tabs";
 import { LiveTranscriptPanel } from "./components/live-transcript-panel";
 import { SessionRecordingActions } from "./components/session-recording-actions";
@@ -301,19 +301,17 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         CANCELLED: "border-red-300 bg-red-100/70 text-red-900",
     };
     const statusBadgeClass = statusBadgeClassMap[currentAppointment.status] || "border-border bg-muted/70 text-foreground";
-    const pythonBackendUrl = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL?.trim() || "http://localhost:8000";
+    const [transcriptionLanguage, setTranscriptionLanguage] = React.useState<"urdu" | "english">("urdu");
 
     const {
-        connect,
-        disconnect,
-        connected,
-        sessionId,
         transcript,
-        draftTranscript,
-        speakerRoles,
-        sendAudioChunk,
-        stopSession,
-    } = useClinicalWebSocket(pythonBackendUrl);
+        isProcessing: isChunkProcessing,
+        error: chunkerError,
+        start: startChunker,
+        stop: stopChunker,
+        discard: discardChunker,
+        pause: pauseChunker,
+    } = useSmartChunker(transcriptionLanguage);
 
     // State for recording and devices
     const [isUploading, setIsUploading] = React.useState(false);
@@ -327,12 +325,11 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [activeMainTab, setActiveMainTab] = React.useState<ClinicalSessionTab>("context");
     const [isChatPanelOpen, setIsChatPanelOpen] = React.useState(false);
     const [isChatPanelContentVisible, setIsChatPanelContentVisible] = React.useState(false);
-    const [isLiveConnecting, setIsLiveConnecting] = React.useState(false);
     const [isRecorderPaused, setIsRecorderPaused] = React.useState(false);
-    const liveTranscriptionCancelledRef = React.useRef(false);
     const [noteTemplates, setNoteTemplates] = React.useState<Array<{ id: string; name: string; description: string; template: SoapTemplate }>>([]);
     const [selectedTemplateId, setSelectedTemplateId] = React.useState("");
     const [isLoadingNoteTemplates, setIsLoadingNoteTemplates] = React.useState(false);
+    const hasAttemptedLoadTemplatesRef = React.useRef(false);
     const [isGeneratingNote, setIsGeneratingNote] = React.useState(false);
     const [isSavingNote, setIsSavingNote] = React.useState(false);
     const [activeNotePanel, setActiveNotePanel] = React.useState<"editor" | "preview">("editor");
@@ -366,9 +363,6 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const panelRenderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isPanelRendering, setIsPanelRendering] = React.useState(false);
     const transcriptEndRef = React.useRef<HTMLDivElement | null>(null);
-    const liveAudioContextRef = React.useRef<AudioContext | null>(null);
-    const liveProcessorRef = React.useRef<ScriptProcessorNode | null>(null);
-    const liveSourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
     const isRecorderPausedRef = React.useRef(false);
     const [retrievalMode, setRetrievalMode] = React.useState<"normal" | "semantic">("normal");
 
@@ -503,137 +497,50 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         return matchedDevice.label?.trim() || "Unnamed microphone";
     }, [selectableMicrophones, selectedMicrophoneId]);
 
-    const cleanupLiveTranscription = React.useCallback(() => {
-        if (liveProcessorRef.current) {
-            try {
-                liveProcessorRef.current.disconnect();
-            } catch (error) {
-                console.error("Failed to disconnect live processor", error);
-            }
-            liveProcessorRef.current = null;
-        }
 
-        if (liveSourceRef.current) {
-            try {
-                liveSourceRef.current.disconnect();
-            } catch (error) {
-                console.error("Failed to disconnect live source", error);
-            }
-            liveSourceRef.current = null;
-        }
-
-        if (liveAudioContextRef.current && liveAudioContextRef.current.state !== "closed") {
-            void liveAudioContextRef.current.close().catch((error) => {
-                console.error("Failed to close live audio context", error);
-            });
-        }
-
-        liveAudioContextRef.current = null;
-    }, []);
 
     const handleRecordingStart = React.useCallback((stream: MediaStream) => {
-        liveTranscriptionCancelledRef.current = false;
         isRecorderPausedRef.current = false;
         setIsRecorderPaused(false);
         setActiveMainTab("transcript");
+        startChunker(stream);
 
-        void (async () => {
-            setIsLiveConnecting(true);
-
-            try {
-                const connectedToSocket = await connect();
-                if (!connectedToSocket) {
-                    throw new Error("WebSocket unavailable");
-                }
-
-                if (liveTranscriptionCancelledRef.current) {
-                    return;
-                }
-
-                const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
-                const audioContext = new AudioContextCtor({ sampleRate: 16000 });
-                const source = audioContext.createMediaStreamSource(stream);
-                const processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-                processor.onaudioprocess = (event) => {
-                    if (liveTranscriptionCancelledRef.current || isRecorderPausedRef.current) {
-                        return;
-                    }
-
-                    const inputData = event.inputBuffer.getChannelData(0);
-                    const pcmData = new Int16Array(inputData.length);
-
-                    for (let index = 0; index < inputData.length; index += 1) {
-                        const sample = Math.max(-1, Math.min(1, inputData[index]));
-                        pcmData[index] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-                    }
-
-                    sendAudioChunk(pcmData.buffer);
-                };
-
-                source.connect(processor);
-                processor.connect(audioContext.destination);
-
-                liveAudioContextRef.current = audioContext;
-                liveSourceRef.current = source;
-                liveProcessorRef.current = processor;
-
-                toast({
-                    title: "Live transcription connected",
-                    description: "Your recording is now streaming to the Python service.",
-                });
-            } catch (error) {
-                console.error("Failed to initialize live transcription", error);
-                toast({
-                    title: "Live transcription unavailable",
-                    description: "The audio will still be saved, but realtime transcript could not connect.",
-                    variant: "destructive",
-                });
-            } finally {
-                setIsLiveConnecting(false);
-            }
-        })();
-    }, [connect, sendAudioChunk, toast]);
+        toast({
+            title: "Live transcription started",
+            description: "Audio is being chunked and sent to Gemma for real-time transcription.",
+        });
+    }, [startChunker, toast]);
 
     const handleRecordingDiscard = React.useCallback(() => {
-        liveTranscriptionCancelledRef.current = true;
         isRecorderPausedRef.current = false;
         setIsRecorderPaused(false);
-        cleanupLiveTranscription();
-        disconnect();
+        discardChunker();
         setActiveMainTab("context");
-        setIsLiveConnecting(false);
-    }, [cleanupLiveTranscription, disconnect]);
+    }, [discardChunker]);
 
     const handleRecordingStop = React.useCallback(async (audioBlob: Blob) => {
-        liveTranscriptionCancelledRef.current = true;
         isRecorderPausedRef.current = false;
         setIsRecorderPaused(false);
-        stopSession();
-        cleanupLiveTranscription();
+        await stopChunker();
 
         const audioFile = new File([audioBlob], `session-${currentAppointment.id}-${Date.now()}.webm`, { type: audioBlob.type });
 
         await uploadAudioFile(audioFile);
-    }, [cleanupLiveTranscription, currentAppointment.id, stopSession, uploadAudioFile]);
+    }, [currentAppointment.id, stopChunker, uploadAudioFile]);
 
     const handleRecordingPauseChange = React.useCallback((paused: boolean) => {
         isRecorderPausedRef.current = paused;
         setIsRecorderPaused(paused);
-    }, []);
+        pauseChunker(paused);
+    }, [pauseChunker]);
 
     React.useEffect(() => {
         if (activeMainTab === "transcript") {
             transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
         }
-    }, [activeMainTab, displayedTranscript, draftTranscript]);
+    }, [activeMainTab, displayedTranscript]);
 
-    React.useEffect(() => {
-        return () => {
-            cleanupLiveTranscription();
-            disconnect();
-        };
-    }, [cleanupLiveTranscription, disconnect]);
+
 
     React.useEffect(() => {
         if (!hasMountedPanelRef.current) {
@@ -749,6 +656,11 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         event.target.value = "";
     };
 
+    const savedSoapTemplateId = React.useMemo(
+        () => String((currentAppointment as any)?.soapNote?.template?.id || ""),
+        [(currentAppointment as any)?.soapNote?.template?.id],
+    );
+
     const loadActiveTemplates = React.useCallback(async () => {
         setIsLoadingNoteTemplates(true);
         try {
@@ -765,14 +677,12 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             const templates = result.templates || [];
             setNoteTemplates(templates);
 
-            const savedTemplateId = String((currentAppointment as any)?.soapNote?.template?.id || "");
-
             setSelectedTemplateId((current) => {
                 if (current && templates.some((template) => template.id === current)) {
                     return current;
                 }
-                if (savedTemplateId && templates.some((template) => template.id === savedTemplateId)) {
-                    return savedTemplateId;
+                if (savedSoapTemplateId && templates.some((template) => template.id === savedSoapTemplateId)) {
+                    return savedSoapTemplateId;
                 }
                 if (result.defaultTemplateId) {
                     return result.defaultTemplateId;
@@ -789,7 +699,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         } finally {
             setIsLoadingNoteTemplates(false);
         }
-    }, [currentAppointment, toast]);
+    }, [savedSoapTemplateId, toast]);
 
     const handleGenerateTemplateNote = React.useCallback(async () => {
         if (!selectedTemplateId) {
@@ -922,7 +832,11 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         if (noteTemplates.length > 0 || isLoadingNoteTemplates) {
             return;
         }
+        if (hasAttemptedLoadTemplatesRef.current) {
+            return;
+        }
 
+        hasAttemptedLoadTemplatesRef.current = true;
         void loadActiveTemplates();
     }, [activeMainTab, isLoadingNoteTemplates, loadActiveTemplates, noteTemplates.length]);
 
@@ -1223,7 +1137,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         [finalizeTasks, isSessionFinalized],
     );
     const isMainPanelBusy = isPanelRendering
-        || (activeMainTab === "transcript" && isLiveConnecting)
+        || (activeMainTab === "transcript" && isChunkProcessing)
         || (activeMainTab === "note" && (isLoadingNoteTemplates || isGeneratingNote || isSavingNote));
 
     const loadPatientMetricCatalog = React.useCallback(async () => {
@@ -1387,20 +1301,27 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         };
     }, []);
 
-    const chatRuntime = useChatRuntime({
-        transport: new AssistantChatTransport({
-            api: "/api/chat",
-            body: {
-                chatContext: {
-                    appointmentId: currentAppointment?.id ?? null,
-                    patientProfileId: currentAppointment?.patient?.id ?? null,
-                    patientUserId: currentAppointment?.patient?.user?.id ?? null,
-                    patientMetricCatalog,
-                    includePatientDocuments: true,
-                    retrievalMode,
+    const chatTransport = React.useMemo(
+        () =>
+            new AssistantChatTransport({
+                api: "/api/chat",
+                body: {
+                    chatContext: {
+                        appointmentId: currentAppointment?.id ?? null,
+                        patientProfileId: currentAppointment?.patient?.id ?? null,
+                        patientUserId: currentAppointment?.patient?.user?.id ?? null,
+                        patientMetricCatalog,
+                        includePatientDocuments: true,
+                        retrievalMode,
+                    },
                 },
-            },
-        }),
+            }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [currentAppointment?.id, currentAppointment?.patient?.id, currentAppointment?.patient?.user?.id, patientMetricCatalog.length, retrievalMode]
+    );
+
+    const chatRuntime = useChatRuntime({
+        transport: chatTransport,
     });
 
     React.useEffect(() => {
@@ -1485,16 +1406,37 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                 </div>
                             </div>
 
-                            <SessionRecordingActions
-                                isUploading={isUploading}
-                                selectedMicrophoneId={selectedMicrophoneId}
-                                onStart={handleRecordingStart}
-                                onPauseChange={handleRecordingPauseChange}
-                                onDiscard={handleRecordingDiscard}
-                                onStop={handleRecordingStop}
-                                onManualUpload={handleManualUpload}
-                                uploadInputRef={uploadInputRef}
-                            />
+                            <div className="flex items-center gap-2">
+                                <div className="flex items-center rounded-md border border-border bg-muted/40 overflow-hidden">
+                                    <button
+                                        type="button"
+                                        onClick={() => setTranscriptionLanguage("urdu")}
+                                        className={`px-2.5 py-1 text-xs font-semibold transition-colors ${transcriptionLanguage === "urdu" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                                        title="Urdu transcription"
+                                    >
+                                        UR
+                                    </button>
+                                    <div className="w-px h-4 bg-border" />
+                                    <button
+                                        type="button"
+                                        onClick={() => setTranscriptionLanguage("english")}
+                                        className={`px-2.5 py-1 text-xs font-semibold transition-colors ${transcriptionLanguage === "english" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                                        title="English transcription"
+                                    >
+                                        EN
+                                    </button>
+                                </div>
+                                <SessionRecordingActions
+                                    isUploading={isUploading}
+                                    selectedMicrophoneId={selectedMicrophoneId}
+                                    onStart={handleRecordingStart}
+                                    onPauseChange={handleRecordingPauseChange}
+                                    onDiscard={handleRecordingDiscard}
+                                    onStop={handleRecordingStop}
+                                    onManualUpload={handleManualUpload}
+                                    uploadInputRef={uploadInputRef}
+                                />
+                            </div>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-1.5 text-sm">
@@ -1569,10 +1511,19 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                     </Button>
                                                     <Badge variant="outline" className="mx-1 gap-1.5 border-border bg-background/80 text-xs font-semibold">
                                                         <span
-                                                            className={`h-2 w-2 rounded-full ${isLiveConnecting ? "bg-amber-500" : connected ? (isRecorderPaused ? "bg-amber-500" : "bg-emerald-500") : "bg-black shadow-[0_0_8px_1px_rgba(0,0,0,0.45)]"}`}
+                                                            className={
+                                                                "h-2 w-2 rounded-full " +
+                                                                (isChunkProcessing
+                                                                    ? "bg-amber-500 animate-pulse"
+                                                                    : isRecorderPaused
+                                                                      ? "bg-amber-500"
+                                                                      : transcript.length > 0
+                                                                        ? "bg-emerald-500"
+                                                                        : "bg-black shadow-[0_0_8px_1px_rgba(0,0,0,0.45)]")
+                                                            }
                                                             aria-hidden="true"
                                                         />
-                                                        {isLiveConnecting ? "Connecting" : connected ? (isRecorderPaused ? "Paused" : `Live · ${sessionId?.slice(-6) || "ready"}`) : "Offline"}
+                                                        {isChunkProcessing ? "Transcribing..." : isRecorderPaused ? "Paused" : transcript.length > 0 ? "Live" : "Offline"}
                                                     </Badge>
                                                     <DropdownMenuTrigger asChild>
                                                         <Button
@@ -1724,17 +1675,22 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                 </div>
 
                                 <div className={`relative flex-1 min-h-0 p-4 ${activeMainTab === "note" ? "bg-white" : "bg-white/50 dark:bg-black/20"}`}>
-                                    {isMainPanelBusy && (
+                                    {isMainPanelBusy && activeMainTab === "note" && (
                                         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-white">
                                             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                                        </div>
+                                    )}
+                                    {activeMainTab === "transcript" && isChunkProcessing && (
+                                        <div className="pointer-events-none absolute right-3 top-3 z-20 flex items-center gap-1.5 rounded-full border border-border bg-background/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur">
+                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                            Transcribing...
                                         </div>
                                     )}
 
                                     {activeMainTab === "transcript" ? (
                                         <LiveTranscriptPanel
                                             transcript={displayedTranscript}
-                                            draftTranscript={draftTranscript}
-                                            speakerRoles={speakerRoles}
+                                            speakerRoles={{}}
                                             transcriptEndRef={transcriptEndRef}
                                         />
                                     ) : activeMainTab === "note" ? (
@@ -2008,13 +1964,15 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                     </div>
 
                     <div className="flex-1 min-h-0 overflow-hidden">
-                        <AssistantRuntimeProvider runtime={chatRuntime}>
-                            <Thread
-                                patientName={patientName}
-                                retrievalMode={retrievalMode}
-                                onToggleRetrievalMode={handleToggleRetrievalMode}
-                            />
-                        </AssistantRuntimeProvider>
+                        {isChatPanelContentVisible && (
+                            <AssistantRuntimeProvider runtime={chatRuntime}>
+                                <Thread
+                                    patientName={patientName}
+                                    retrievalMode={retrievalMode}
+                                    onToggleRetrievalMode={handleToggleRetrievalMode}
+                                />
+                            </AssistantRuntimeProvider>
+                        )}
                     </div>
 
                 </div>

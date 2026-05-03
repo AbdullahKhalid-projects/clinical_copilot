@@ -1,18 +1,16 @@
 "use client";
 
 import type { RefObject } from "react";
-import type { TranscriptSegment } from "@/hooks/use-clinical-websocket";
+import type { TranscriptSegment } from "@/hooks/use-smart-chunker";
 
 interface LiveTranscriptPanelProps {
   transcript: TranscriptSegment[];
-  draftTranscript: string;
   speakerRoles: Record<string, string>;
   transcriptEndRef: RefObject<HTMLDivElement | null>;
 }
 
 export function LiveTranscriptPanel({
   transcript,
-  draftTranscript,
   speakerRoles,
   transcriptEndRef,
 }: LiveTranscriptPanelProps) {
@@ -43,13 +41,11 @@ export function LiveTranscriptPanel({
   return (
     <div className="flex h-full min-h-0 w-full flex-col text-left">
       <div className="flex-1 space-y-4 overflow-y-auto px-2 py-1 sm:px-3 sm:py-2">
-        {transcript.length === 0 && !draftTranscript ? (
+        {transcript.length === 0 ? (
           <div className="rounded-lg border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
-            Start recording from the header to stream audio into the Python transcription service.
+            Start recording to transcribe the consultation with Gemma.
           </div>
         ) : null}
-
-        {draftTranscript ? renderBubble(draftTranscript, "left", "draft", "Processing") : null}
 
         {transcript.map((segment, index) => {
           const role = segment.role || speakerRoles[segment.speaker] || segment.speaker;
