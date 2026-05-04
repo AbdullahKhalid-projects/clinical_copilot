@@ -3,9 +3,10 @@ import OpenAI from "openai";
 
 const GEMMA_BASE_URL =
   process.env.GEMMA_BASE_URL?.trim() ||
-  "https://muddasirjaved666--example-gemma-4-e2b-it-inference-vllms-c57b5d.modal.run/v1";
+  "https://muddasirjaved666--example-gemma-4-e2b-autoround-it-infer-780f02.modal.run/v1";
 const GEMMA_API_KEY = "sk-dummy-anything";
-const GEMMA_MODEL = process.env.GEMMA_MODEL?.trim() || "google/gemma-4-E2B-it";
+const GEMMA_MODEL =
+  process.env.GEMMA_MODEL?.trim() || "cyankiwi/gemma-4-E4B-it-AWQ-INT4";
 
 const openai = new OpenAI({
   baseURL: GEMMA_BASE_URL,
@@ -173,7 +174,7 @@ export async function POST(req: NextRequest) {
           },
         ],
         max_tokens: 8000,
-        temperature: 0.3,
+        temperature: 0,
         response_format: { type: "json_object" },
       });
 
@@ -253,7 +254,7 @@ export async function POST(req: NextRequest) {
           ],
         },
       ],
-      temperature: 0.3,
+      temperature: 0,
       max_tokens: 8000,
       response_format: { type: "json_object" },
     });

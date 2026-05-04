@@ -16,7 +16,7 @@ interface ChunkApiResponse {
 const SAMPLE_RATE = 32000;
 const MIN_CHUNK_SEC = 15;
 const MAX_CHUNK_SEC = 25; // Strictly below 30s
-const SILENCE_SEC = 2;
+const SILENCE_SEC = 20;
 const SILENCE_THRESHOLD = 0.015;
 
 export function useSmartChunker(language: "urdu" | "english" = "urdu") {
