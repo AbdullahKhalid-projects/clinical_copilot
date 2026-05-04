@@ -28,3 +28,4 @@ Use this sequence when deploying Note Studio persistence changes to a new enviro
 For local schema changes before commit:
 
 - `npm run db:migrate:dev -- --name <migration_name>`
+# fypFrontend
