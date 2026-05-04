@@ -326,6 +326,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [isChatPanelOpen, setIsChatPanelOpen] = React.useState(false);
     const [isChatPanelContentVisible, setIsChatPanelContentVisible] = React.useState(false);
     const [isRecorderPaused, setIsRecorderPaused] = React.useState(false);
+    const [isTranscribingLive, setIsTranscribingLive] = React.useState(false);
     const [noteTemplates, setNoteTemplates] = React.useState<Array<{ id: string; name: string; description: string; template: SoapTemplate }>>([]);
     const [selectedTemplateId, setSelectedTemplateId] = React.useState("");
     const [isLoadingNoteTemplates, setIsLoadingNoteTemplates] = React.useState(false);
@@ -347,6 +348,9 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [isLinkingPatient, setIsLinkingPatient] = React.useState(false);
     const [isDeletingAppointment, setIsDeletingAppointment] = React.useState(false);
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
+    const [isWarmupDialogOpen, setIsWarmupDialogOpen] = React.useState(false);
+    const [warmupStatus, setWarmupStatus] = React.useState<"warming" | "ready">("warming");
+    const pendingStreamRef = React.useRef<MediaStream | null>(null);
     const [linkablePatients, setLinkablePatients] = React.useState<LinkablePatient[]>([]);
     const [isFinalizeDialogOpen, setIsFinalizeDialogOpen] = React.useState(false);
     const [isFinalizeChecklistLoading, setIsFinalizeChecklistLoading] = React.useState(false);
@@ -499,28 +503,51 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
 
 
-    const handleRecordingStart = React.useCallback((stream: MediaStream) => {
+    const handleRecordingStart = React.useCallback(async (stream: MediaStream) => {
         isRecorderPausedRef.current = false;
         setIsRecorderPaused(false);
         setActiveMainTab("transcript");
-        startChunker(stream);
 
-        toast({
-            title: "Live transcription started",
-            description: "Audio is being chunked and sent to Gemma for real-time transcription.",
-        });
+        pendingStreamRef.current = stream;
+        setIsWarmupDialogOpen(true);
+        setWarmupStatus("warming");
+
+        try {
+            await fetch("/api/warmup-model", { signal: AbortSignal.timeout(240000) });
+        } catch {
+            // Even on timeout/error the container is likely spinning up.
+        }
+
+        setWarmupStatus("ready");
+    }, []);
+
+    const handleStartSessionAfterWarmup = React.useCallback(() => {
+        setIsWarmupDialogOpen(false);
+        const stream = pendingStreamRef.current;
+        if (stream) {
+            setIsTranscribingLive(true);
+            startChunker(stream);
+            toast({
+                title: "Live transcription started",
+                description: "Audio is being chunked and sent to Gemma for real-time transcription.",
+            });
+        }
     }, [startChunker, toast]);
 
     const handleRecordingDiscard = React.useCallback(() => {
         isRecorderPausedRef.current = false;
         setIsRecorderPaused(false);
+        setIsTranscribingLive(false);
         discardChunker();
+        pendingStreamRef.current = null;
+        setIsWarmupDialogOpen(false);
         setActiveMainTab("context");
     }, [discardChunker]);
 
     const handleRecordingStop = React.useCallback(async (audioBlob: Blob) => {
         isRecorderPausedRef.current = false;
         setIsRecorderPaused(false);
+        setIsTranscribingLive(false);
         await stopChunker();
 
         const audioFile = new File([audioBlob], `session-${currentAppointment.id}-${Date.now()}.webm`, { type: audioBlob.type });
@@ -1435,6 +1462,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                     onStop={handleRecordingStop}
                                     onManualUpload={handleManualUpload}
                                     uploadInputRef={uploadInputRef}
+                                    isTranscribing={isTranscribingLive}
                                 />
                             </div>
                         </div>
@@ -1517,13 +1545,15 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                                     ? "bg-amber-500 animate-pulse"
                                                                     : isRecorderPaused
                                                                       ? "bg-amber-500"
-                                                                      : transcript.length > 0
+                                                                      : isTranscribingLive
                                                                         ? "bg-emerald-500"
-                                                                        : "bg-black shadow-[0_0_8px_1px_rgba(0,0,0,0.45)]")
+                                                                        : transcript.length > 0
+                                                                          ? "bg-emerald-500"
+                                                                          : "bg-black shadow-[0_0_8px_1px_rgba(0,0,0,0.45)]")
                                                             }
                                                             aria-hidden="true"
                                                         />
-                                                        {isChunkProcessing ? "Transcribing..." : isRecorderPaused ? "Paused" : transcript.length > 0 ? "Live" : "Offline"}
+                                                        {isChunkProcessing ? "Transcribing..." : isRecorderPaused ? "Paused" : isTranscribingLive ? "Live" : transcript.length > 0 ? "Live" : "Offline"}
                                                     </Badge>
                                                     <DropdownMenuTrigger asChild>
                                                         <Button
@@ -2004,6 +2034,46 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                     <div className="h-full bg-blue-500 animate-[pulse_2s_cubic-bezier(0.4,0,0.6,1)_infinite] w-full origin-left" />
                                 </div>
                                 <p className="text-sm text-muted-foreground animate-pulse">Uploading audio data...</p>
+                            </>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isWarmupDialogOpen} onOpenChange={() => { }}>
+                <DialogContent className="sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
+                    <DialogHeader>
+                        <DialogTitle>
+                            {warmupStatus === "warming" ? "Warming up model..." : "Ready to transcribe"}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {warmupStatus === "warming"
+                                ? "Please wait while the transcription engine starts. This may take up to 4 minutes on first use."
+                                : "The model is warmed up and ready. Click Start Session to begin real-time transcription."}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex flex-col items-center justify-center py-8 space-y-6">
+                        {warmupStatus === "warming" ? (
+                            <>
+                                <div className="h-12 w-12 rounded-full bg-amber-50 flex items-center justify-center">
+                                    <Loader2 className="h-6 w-6 text-amber-600 animate-spin" />
+                                </div>
+                                <p className="text-sm text-muted-foreground animate-pulse">Spinning up Gemma container...</p>
+                            </>
+                        ) : (
+                            <>
+                                <div className="h-12 w-12 rounded-full bg-emerald-100 flex items-center justify-center animate-in zoom-in duration-300">
+                                    <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </div>
+                                <Button
+                                    type="button"
+                                    className="w-full"
+                                    onClick={handleStartSessionAfterWarmup}
+                                >
+                                    Start Session
+                                </Button>
                             </>
                         )}
                     </div>

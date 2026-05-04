@@ -21,6 +21,7 @@ type Props = {
   onStop: (blob: Blob) => void;
   isUploading: boolean;
   selectedMicrophoneId?: string;
+  isTranscribing?: boolean; // Controls when the timer starts (after warmup)
 };
 
 // Utility function to pad a number with leading zeros
@@ -37,6 +38,7 @@ export const AudioRecorderWithVisualizer = ({
   onStop,
   isUploading,
   selectedMicrophoneId,
+  isTranscribing = false,
 }: Props) => {
   const { theme } = useTheme();
   // States
@@ -246,9 +248,9 @@ export const AudioRecorderWithVisualizer = ({
     onDiscard?.();
   }
 
-  // Effect to update the timer every second
+  // Effect to update the timer every second (only after warmup / isTranscribing)
   useEffect(() => {
-    if (isRecording && !isPaused) {
+    if (isRecording && !isPaused && isTranscribing) {
       timerTimeoutRef.current = setTimeout(() => {
         setTimer((prev) => prev + 1);
       }, 1000);
@@ -256,7 +258,7 @@ export const AudioRecorderWithVisualizer = ({
     return () => {
       if (timerTimeoutRef.current) clearTimeout(timerTimeoutRef.current);
     };
-  }, [isRecording, isPaused, timer]);
+  }, [isRecording, isPaused, isTranscribing, timer]);
 
   // Visualizer
   useEffect(() => {

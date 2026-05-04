@@ -15,7 +15,7 @@ interface ChunkApiResponse {
 
 const SAMPLE_RATE = 32000;
 const MIN_CHUNK_SEC = 15;
-const MAX_CHUNK_SEC = 29; // Strictly below 30s
+const MAX_CHUNK_SEC = 25; // Strictly below 30s
 const SILENCE_SEC = 2;
 const SILENCE_THRESHOLD = 0.015;
 
@@ -48,100 +48,103 @@ export function useSmartChunker(language: "urdu" | "english" = "urdu") {
   };
 
   /** Flush an EXACT number of samples to the API and carry over the remainder. */
-  const flushBuffer = useCallback(async (samplesToFlush: number) => {
-    if (isFlushingRef.current) return;
-    isFlushingRef.current = true;
+  const flushBuffer = useCallback(
+    async (samplesToFlush: number) => {
+      if (isFlushingRef.current) return;
+      isFlushingRef.current = true;
 
-    const buffers = pcmBuffersRef.current;
-    if (buffers.length === 0 || totalSamplesRef.current === 0) {
-      isFlushingRef.current = false;
-      return;
-    }
-
-    // Prevent asking for more samples than we have
-    samplesToFlush = Math.min(samplesToFlush, totalSamplesRef.current);
-
-    // Flatten current buffers
-    const totalSamples = totalSamplesRef.current;
-    const concatenated = new Int16Array(totalSamples);
-    let offset = 0;
-    for (const buf of buffers) {
-      concatenated.set(buf, offset);
-      offset += buf.length;
-    }
-
-    // Extract exactly the chunk we are allowed to send (<= 28s)
-    const chunkToProcess = concatenated.slice(0, samplesToFlush);
-
-    // Carry over the remainder into the next chunk
-    const remainder = concatenated.slice(samplesToFlush);
-    pcmBuffersRef.current = remainder.length > 0 ? [remainder] : [];
-    totalSamplesRef.current = remainder.length;
-    silenceSamplesRef.current = 0;
-    lastSafeSplitRef.current = 0;
-
-    // Skip tiny artifact chunks
-    if (chunkToProcess.length < SAMPLE_RATE * 1) {
-      isFlushingRef.current = false;
-      return;
-    }
-
-    // Encode strictly the isolated chunk
-    const wavBlob = encodeWav(chunkToProcess, SAMPLE_RATE, 1);
-
-    setIsProcessing(true);
-
-    try {
-      const currentTranscript = transcriptRef.current;
-      const context = currentTranscript.slice(-1).map((seg) => ({
-        type: seg.role?.toLowerCase() || seg.speaker.toLowerCase(),
-        text: seg.text,
-      }));
-
-      const formData = new FormData();
-      formData.append("audio", wavBlob, `chunk-${Date.now()}.wav`);
-      formData.append("language", language);
-      if (context.length > 0) {
-        formData.append("context", JSON.stringify(context));
+      const buffers = pcmBuffersRef.current;
+      if (buffers.length === 0 || totalSamplesRef.current === 0) {
+        isFlushingRef.current = false;
+        return;
       }
 
-      const res = await fetch("/api/transcribe-chunk", {
-        method: "POST",
-        body: formData,
-        signal: abortControllerRef.current?.signal,
-      });
+      // Prevent asking for more samples than we have
+      samplesToFlush = Math.min(samplesToFlush, totalSamplesRef.current);
 
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(
-          `Transcription failed (${res.status}): ${text.slice(0, 200)}`,
+      // Flatten current buffers
+      const totalSamples = totalSamplesRef.current;
+      const concatenated = new Int16Array(totalSamples);
+      let offset = 0;
+      for (const buf of buffers) {
+        concatenated.set(buf, offset);
+        offset += buf.length;
+      }
+
+      // Extract exactly the chunk we are allowed to send (<= 28s)
+      const chunkToProcess = concatenated.slice(0, samplesToFlush);
+
+      // Carry over the remainder into the next chunk
+      const remainder = concatenated.slice(samplesToFlush);
+      pcmBuffersRef.current = remainder.length > 0 ? [remainder] : [];
+      totalSamplesRef.current = remainder.length;
+      silenceSamplesRef.current = 0;
+      lastSafeSplitRef.current = 0;
+
+      // Skip tiny artifact chunks
+      if (chunkToProcess.length < SAMPLE_RATE * 1) {
+        isFlushingRef.current = false;
+        return;
+      }
+
+      // Encode strictly the isolated chunk
+      const wavBlob = encodeWav(chunkToProcess, SAMPLE_RATE, 1);
+
+      setIsProcessing(true);
+
+      try {
+        const currentTranscript = transcriptRef.current;
+        const context = currentTranscript.slice(-1).map((seg) => ({
+          type: seg.role?.toLowerCase() || seg.speaker.toLowerCase(),
+          text: seg.text,
+        }));
+
+        const formData = new FormData();
+        formData.append("audio", wavBlob, `chunk-${Date.now()}.wav`);
+        formData.append("language", language);
+        if (context.length > 0) {
+          formData.append("context", JSON.stringify(context));
+        }
+
+        const res = await fetch("/api/transcribe-chunk", {
+          method: "POST",
+          body: formData,
+          signal: abortControllerRef.current?.signal,
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(
+            `Transcription failed (${res.status}): ${text.slice(0, 200)}`,
+          );
+        }
+
+        const data = (await res.json()) as ChunkApiResponse;
+        const newSegments: TranscriptSegment[] = (data.segments || []).map(
+          (seg) => ({
+            text: seg.text.trim(),
+            speaker: seg.type === "doctor" ? "Doctor" : "Patient",
+            role: seg.type === "doctor" ? "Doctor" : "Patient",
+            start: 0,
+            end: 0,
+          }),
         );
+
+        setTranscript((prev) => {
+          const next = [...prev, ...newSegments];
+          transcriptRef.current = next;
+          return next;
+        });
+      } catch (err: any) {
+        console.error("[Chunker] Flush error:", err);
+        setError(err.message || "Transcription chunk failed");
+      } finally {
+        setIsProcessing(false);
+        isFlushingRef.current = false;
       }
-
-      const data = (await res.json()) as ChunkApiResponse;
-      const newSegments: TranscriptSegment[] = (data.segments || []).map(
-        (seg) => ({
-          text: seg.text.trim(),
-          speaker: seg.type === "doctor" ? "Doctor" : "Patient",
-          role: seg.type === "doctor" ? "Doctor" : "Patient",
-          start: 0,
-          end: 0,
-        }),
-      );
-
-      setTranscript((prev) => {
-        const next = [...prev, ...newSegments];
-        transcriptRef.current = next;
-        return next;
-      });
-    } catch (err: any) {
-      console.error("[Chunker] Flush error:", err);
-      setError(err.message || "Transcription chunk failed");
-    } finally {
-      setIsProcessing(false);
-      isFlushingRef.current = false;
-    }
-  }, [language]);
+    },
+    [language],
+  );
 
   const maybeFlush = useCallback(() => {
     const totalSec = totalSamplesRef.current / SAMPLE_RATE;

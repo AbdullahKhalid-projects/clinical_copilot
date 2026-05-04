@@ -14,6 +14,7 @@ interface SessionRecordingActionsProps {
   onStop: (blob: Blob) => void;
   onManualUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   uploadInputRef: RefObject<HTMLInputElement | null>;
+  isTranscribing?: boolean;
 }
 
 export function SessionRecordingActions({
@@ -25,6 +26,7 @@ export function SessionRecordingActions({
   onStop,
   onManualUpload,
   uploadInputRef,
+  isTranscribing,
 }: SessionRecordingActionsProps) {
   return (
     <div className="flex items-center gap-3">
@@ -54,6 +56,7 @@ export function SessionRecordingActions({
         onStop={onStop}
         isUploading={isUploading}
         selectedMicrophoneId={selectedMicrophoneId}
+        isTranscribing={isTranscribing}
       />
     </div>
   );
