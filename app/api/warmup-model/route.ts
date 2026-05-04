@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 const GEMMA_BASE_URL =
   process.env.GEMMA_BASE_URL?.trim() ||
-  "https://muddasirjaved666--example-gemma-4-e2b-it-inference-vllms-c57b5d.modal.run/v1";
+  "https://muddasirjaved666--example-gemma-4-e2b-autoround-it-infer-780f02.modal.run/v1";
 
 export async function GET() {
   try {
