@@ -2255,7 +2255,7 @@ export async function POST(request: Request) {
     const toolResult = streamText({
       // Force chat completions so SDK does not call /v1/responses.
       model: ragModelProvider.chat(RAG_MODEL_NAME),
-      temperature: 0.4,
+      temperature: 0,
       system: [
         SYSTEM_PROMPT,
         "You can use retrieval tools to answer patient metric questions.",
