@@ -33,38 +33,46 @@ import {
 } from "@/code";
 
 const SYSTEM_PROMPT =
-  "You are Shifa, a clinical copilot assistant. Provide thorough, clinically useful responses with relevant analysis when warranted. Acknowledge uncertainty and suggest next best questions when appropriate. However, do not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.";
+  "You are Shifa, a strict clinical data retrieval assistant. Your sole responsibility is to fetch patient data using tools and report the exact results concisely. " +
+  "CRITICAL RULES: " +
+  "1. Be extremely concise. Use short bullet points. " +
+  "2. NEVER provide medical advice, clinical recommendations, or manual clinical assessments of any kind. " +
+  "3. DO NOT extrapolate or add external medical knowledge. Output ONLY the data the tools return. " +
+  "4. If a tool fails or returns no data, state the failure in one brief sentence. DO NOT guess why it failed or offer to do manual checks. " +
+  "5. Do not offer to perform actions you cannot carry out.";
 
 const RAG_MODEL_BASE_URL =
   process.env.CHAT_PANEL_MODEL_URL?.trim() ||
-  "https://openrouter.ai/api/v1";
+  "https://bsparx64--example-qwen3-6-27b-awq-inference-vllmserver-serve.modal.run/v1";
 const RAG_MODEL_NAME =
   process.env.CHAT_PANEL_MODEL_NAME?.trim() ||
-  "qwen/qwen3.6-plus";
+  "Intel/Qwen3.6-27B-int4-AutoRound";
 const CHAT_PANEL_MODEL_API_KEY =
   process.env.OPENROUTER_API_KEY ??
   process.env.RAG_MODEL_API_KEY ??
   "dummy-key";
 const RAG_EMPTY_204_RETRY_COUNT = Math.max(
   0,
-  Number.parseInt(process.env.RAG_EMPTY_204_RETRY_COUNT ?? "1", 10) || 1
+  Number.parseInt(process.env.RAG_EMPTY_204_RETRY_COUNT ?? "1", 10) || 1,
 );
 const RAG_5XX_RETRY_COUNT = Math.max(
   0,
-  Number.parseInt(process.env.RAG_5XX_RETRY_COUNT ?? "2", 10) || 2
+  Number.parseInt(process.env.RAG_5XX_RETRY_COUNT ?? "2", 10) || 2,
 );
 const RAG_RETRY_BASE_DELAY_MS = Math.max(
   0,
-  Number.parseInt(process.env.RAG_RETRY_BASE_DELAY_MS ?? "250", 10) || 250
+  Number.parseInt(process.env.RAG_RETRY_BASE_DELAY_MS ?? "250", 10) || 250,
 );
 const RAG_UPSTREAM_TIMEOUT_MS = Math.max(
   10000,
-  Number.parseInt(process.env.RAG_UPSTREAM_TIMEOUT_MS ?? "45000", 10) || 45000
+  Number.parseInt(process.env.RAG_UPSTREAM_TIMEOUT_MS ?? "45000", 10) || 45000,
 );
 const STRUCTURED_TOOL_CALLING_ENABLED =
-  (process.env.STRUCTURED_TOOL_CALLING_ENABLED ?? "false").toLowerCase() === "true";
+  (process.env.STRUCTURED_TOOL_CALLING_ENABLED ?? "false").toLowerCase() ===
+  "true";
 const STRUCTURED_TOOL_DEBUG_LOGS_ENABLED =
-  (process.env.STRUCTURED_TOOL_DEBUG_LOGS_ENABLED ?? "true").toLowerCase() === "true";
+  (process.env.STRUCTURED_TOOL_DEBUG_LOGS_ENABLED ?? "true").toLowerCase() ===
+  "true";
 const CHAT_DEBUG_LOGS_ENABLED =
   (process.env.CHAT_DEBUG_LOGS_ENABLED ?? "true").toLowerCase() === "true";
 const NEO4J_URI = process.env.NEO4J_URI?.trim() ?? "";
@@ -72,28 +80,29 @@ const NEO4J_USERNAME = process.env.NEO4J_USERNAME?.trim() ?? "";
 const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD ?? "";
 const NEO4J_DATABASE = process.env.NEO4J_DATABASE?.trim() || undefined;
 const RAG_PRESERVE_THINKING_ENABLED =
-  (process.env.RAG_PRESERVE_THINKING_ENABLED ?? "false").toLowerCase() === "true";
+  (process.env.RAG_PRESERVE_THINKING_ENABLED ?? "false").toLowerCase() ===
+  "true";
 const SEMANTIC_SEND_REASONING =
   (process.env.SEMANTIC_SEND_REASONING ?? "false").toLowerCase() === "true";
 const SEMANTIC_MAX_OUTPUT_TOKENS = Math.max(
   128,
-  Number.parseInt(process.env.SEMANTIC_MAX_OUTPUT_TOKENS ?? "700", 10) || 700
+  Number.parseInt(process.env.SEMANTIC_MAX_OUTPUT_TOKENS ?? "700", 10) || 700,
 );
 const SEMANTIC_RETRIEVAL_TOP_K = Math.max(
   1,
-  Number.parseInt(process.env.SEMANTIC_RETRIEVAL_TOP_K ?? "24", 10) || 24
+  Number.parseInt(process.env.SEMANTIC_RETRIEVAL_TOP_K ?? "24", 10) || 24,
 );
 const RAG_MAX_CONTEXT_CHUNKS = Math.max(
   1,
-  Number.parseInt(process.env.RAG_MAX_CONTEXT_CHUNKS ?? "5", 10) || 5
+  Number.parseInt(process.env.RAG_MAX_CONTEXT_CHUNKS ?? "5", 10) || 5,
 );
 const RAG_MAX_CHUNK_CHARS = Math.max(
   400,
-  Number.parseInt(process.env.RAG_MAX_CHUNK_CHARS ?? "1800", 10) || 1800
+  Number.parseInt(process.env.RAG_MAX_CHUNK_CHARS ?? "1800", 10) || 1800,
 );
 const RAG_MAX_TOTAL_CHARS = Math.max(
   1200,
-  Number.parseInt(process.env.RAG_MAX_TOTAL_CHARS ?? "7000", 10) || 7000
+  Number.parseInt(process.env.RAG_MAX_TOTAL_CHARS ?? "7000", 10) || 7000,
 );
 const STRUCTURED_HISTORY_MAX_ITEMS = 300;
 const TOOL_RESULT_MAX_CHUNKS = 4;
@@ -102,11 +111,12 @@ const TOOL_RESULT_MAX_TOTAL_CHARS = 9000;
 const CONVERSATION_CONTEXT_MAX_MESSAGES = 6;
 const CONVERSATION_CONTEXT_MAX_CHARS = Math.max(
   300,
-  Number.parseInt(process.env.CONVERSATION_CONTEXT_MAX_CHARS ?? "1400", 10) || 1400
+  Number.parseInt(process.env.CONVERSATION_CONTEXT_MAX_CHARS ?? "1400", 10) ||
+    1400,
 );
 const NEO4J_TOOL_RESULT_MAX_ROWS = Math.max(
   1,
-  Number.parseInt(process.env.NEO4J_TOOL_RESULT_MAX_ROWS ?? "25", 10) || 25
+  Number.parseInt(process.env.NEO4J_TOOL_RESULT_MAX_ROWS ?? "25", 10) || 25,
 );
 const THINK_OPEN_TAG = "<think>";
 const THINK_CLOSE_TAG = "</think>";
@@ -119,9 +129,15 @@ const ragModelProvider = createOpenAI({
   apiKey: CHAT_PANEL_MODEL_API_KEY,
   fetch: async (input, init) => {
     const requestUrl =
-      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
 
-    const withPreserveThinking = (requestInit: RequestInit | undefined): RequestInit | undefined => {
+    const withPreserveThinking = (
+      requestInit: RequestInit | undefined,
+    ): RequestInit | undefined => {
       if (!RAG_PRESERVE_THINKING_ENABLED) {
         return requestInit;
       }
@@ -142,7 +158,9 @@ const ragModelProvider = createOpenAI({
 
         const existingKwargsRaw = parsed.chat_template_kwargs;
         const existingKwargs =
-          existingKwargsRaw && typeof existingKwargsRaw === "object" && !Array.isArray(existingKwargsRaw)
+          existingKwargsRaw &&
+          typeof existingKwargsRaw === "object" &&
+          !Array.isArray(existingKwargsRaw)
             ? (existingKwargsRaw as Record<string, unknown>)
             : {};
 
@@ -178,7 +196,7 @@ const ragModelProvider = createOpenAI({
           baseInit.signal.addEventListener(
             "abort",
             () => timeoutController.abort(),
-            { once: true }
+            { once: true },
           );
         }
       }
@@ -195,8 +213,10 @@ const ragModelProvider = createOpenAI({
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           const timeoutError = Object.assign(
-            new Error(`Model upstream timed out after ${RAG_UPSTREAM_TIMEOUT_MS}ms.`),
-            { statusCode: 504 }
+            new Error(
+              `Model upstream timed out after ${RAG_UPSTREAM_TIMEOUT_MS}ms.`,
+            ),
+            { statusCode: 504 },
           );
           throw timeoutError;
         }
@@ -205,8 +225,10 @@ const ragModelProvider = createOpenAI({
         clearTimeout(timeoutHandle);
       }
     };
-    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-    const shouldRetry5xx = (status: number) => [500, 502, 503, 504].includes(status);
+    const sleep = (ms: number) =>
+      new Promise((resolve) => setTimeout(resolve, ms));
+    const shouldRetry5xx = (status: number) =>
+      [500, 502, 503, 504].includes(status);
 
     let response = await attemptFetch();
     let emptyBodyAttempts = 0;
@@ -216,20 +238,26 @@ const ragModelProvider = createOpenAI({
     while (true) {
       totalAttempts += 1;
 
-      if (response.status === 204 && emptyBodyAttempts < RAG_EMPTY_204_RETRY_COUNT) {
+      if (
+        response.status === 204 &&
+        emptyBodyAttempts < RAG_EMPTY_204_RETRY_COUNT
+      ) {
         emptyBodyAttempts += 1;
         console.warn(
-          `Model endpoint returned HTTP 204 (empty body). Retrying ${emptyBodyAttempts}/${RAG_EMPTY_204_RETRY_COUNT}.`
+          `Model endpoint returned HTTP 204 (empty body). Retrying ${emptyBodyAttempts}/${RAG_EMPTY_204_RETRY_COUNT}.`,
         );
         await sleep(RAG_RETRY_BASE_DELAY_MS * emptyBodyAttempts);
         response = await attemptFetch();
         continue;
       }
 
-      if (shouldRetry5xx(response.status) && serverErrorAttempts < RAG_5XX_RETRY_COUNT) {
+      if (
+        shouldRetry5xx(response.status) &&
+        serverErrorAttempts < RAG_5XX_RETRY_COUNT
+      ) {
         serverErrorAttempts += 1;
         console.warn(
-          `Model endpoint returned HTTP ${response.status}. Retrying ${serverErrorAttempts}/${RAG_5XX_RETRY_COUNT}.`
+          `Model endpoint returned HTTP ${response.status}. Retrying ${serverErrorAttempts}/${RAG_5XX_RETRY_COUNT}.`,
         );
         await sleep(RAG_RETRY_BASE_DELAY_MS * serverErrorAttempts);
         response = await attemptFetch();
@@ -304,7 +332,7 @@ function createStripThinkTransform() {
         const remainderLowered = lowered.slice(cursor);
         const tailLength = Math.max(
           longestTagPrefixAtEnd(remainderLowered, THINK_OPEN_TAG),
-          longestTagPrefixAtEnd(remainderLowered, THINK_CLOSE_TAG)
+          longestTagPrefixAtEnd(remainderLowered, THINK_CLOSE_TAG),
         );
 
         if (tailLength > 0) {
@@ -348,7 +376,9 @@ function createStripThinkTransform() {
         }
 
         if (part.type === "text-delta" && typeof part.delta === "string") {
-          const sanitizedDelta = stripInternalChunkRefs(processText(part.delta));
+          const sanitizedDelta = stripInternalChunkRefs(
+            processText(part.delta),
+          );
           if (sanitizedDelta.length === 0) {
             return;
           }
@@ -404,7 +434,10 @@ function formatChatStreamError(error: unknown): string {
     return "The model endpoint timed out before completing the response. Please retry with a shorter query or reduced context.";
   }
 
-  const message = typeof maybeError.message === "string" ? maybeError.message.toLowerCase() : "";
+  const message =
+    typeof maybeError.message === "string"
+      ? maybeError.message.toLowerCase()
+      : "";
   if (message.includes("empty response body")) {
     return "The model endpoint returned an empty response. Please try again.";
   }
@@ -418,7 +451,12 @@ function formatChatStreamError(error: unknown): string {
 
 function getMessageText(message: UIMessage): string {
   return message.parts
-    .filter((part): part is Extract<(typeof message.parts)[number], { type: "text" }> => part.type === "text")
+    .filter(
+      (
+        part,
+      ): part is Extract<(typeof message.parts)[number], { type: "text" }> =>
+        part.type === "text",
+    )
     .map((part) => part.text.trim())
     .filter((text) => text.length > 0)
     .join(" ")
@@ -459,7 +497,9 @@ function getConversationContext(messages: UIMessage[]): string {
     return combined;
   }
 
-  return combined.slice(combined.length - CONVERSATION_CONTEXT_MAX_CHARS).trimStart();
+  return combined
+    .slice(combined.length - CONVERSATION_CONTEXT_MAX_CHARS)
+    .trimStart();
 }
 
 type ChatContextPayload = {
@@ -582,7 +622,9 @@ function getNeo4jDriverOrError(): { driver: Driver | null; error?: string } {
       !NEO4J_URI && "NEO4J_URI",
       !NEO4J_USERNAME && "NEO4J_USERNAME",
       !NEO4J_PASSWORD && "NEO4J_PASSWORD",
-    ].filter(Boolean).join(", ");
+    ]
+      .filter(Boolean)
+      .join(", ");
     console.warn("[Neo4j] Driver init skipped — missing env:", missing);
     return {
       driver: null,
@@ -592,13 +634,18 @@ function getNeo4jDriverOrError(): { driver: Driver | null; error?: string } {
   }
 
   if (!neo4jDriverSingleton) {
-    console.info("[Neo4j] Creating driver singleton for URI:", NEO4J_URI, "database:", NEO4J_DATABASE ?? "default");
+    console.info(
+      "[Neo4j] Creating driver singleton for URI:",
+      NEO4J_URI,
+      "database:",
+      NEO4J_DATABASE ?? "default",
+    );
     neo4jDriverSingleton = neo4j.driver(
       NEO4J_URI,
       neo4j.auth.basic(NEO4J_USERNAME, NEO4J_PASSWORD),
       {
         disableLosslessIntegers: true,
-      }
+      },
     );
   }
 
@@ -607,11 +654,14 @@ function getNeo4jDriverOrError(): { driver: Driver | null; error?: string } {
 
 async function runNeo4jReadQuery(
   query: string,
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
 ): Promise<{ ok: true; rows: Neo4jQueryRow[] } | { ok: false; error: string }> {
   const { driver, error } = getNeo4jDriverOrError();
   if (!driver) {
-    console.warn("[Neo4j] runNeo4jReadQuery aborted — driver unavailable:", error);
+    console.warn(
+      "[Neo4j] runNeo4jReadQuery aborted — driver unavailable:",
+      error,
+    );
     return {
       ok: false,
       error: error ?? "Neo4j driver is not available.",
@@ -628,11 +678,13 @@ async function runNeo4jReadQuery(
         }
       : {
           defaultAccessMode: neo4j.session.READ,
-        }
+        },
   );
 
   try {
-    const result = await session.executeRead((tx: any) => tx.run(query, params));
+    const result = await session.executeRead((tx: any) =>
+      tx.run(query, params),
+    );
     const rows: Neo4jQueryRow[] = result.records.map((record: any) => {
       const row: Neo4jQueryRow = {};
       for (const key of record.keys) {
@@ -648,7 +700,8 @@ async function runNeo4jReadQuery(
 
     return { ok: true, rows };
   } catch (queryError) {
-    const message = queryError instanceof Error ? queryError.message : "Neo4j query failed.";
+    const message =
+      queryError instanceof Error ? queryError.message : "Neo4j query failed.";
     console.error("[Neo4j] Query failed:", message, { params });
     return {
       ok: false,
@@ -665,11 +718,15 @@ function toStringArray(value: unknown): string[] {
   }
 
   return value
-    .map((item) => (typeof item === "string" ? item.trim() : String(item ?? "").trim()))
+    .map((item) =>
+      typeof item === "string" ? item.trim() : String(item ?? "").trim(),
+    )
     .filter((item) => item.length > 0);
 }
 
-function formatNeo4jPatientClinicalSummaryToolOutput(result: Neo4jPatientClinicalSummaryResult): string {
+function formatNeo4jPatientClinicalSummaryToolOutput(
+  result: Neo4jPatientClinicalSummaryResult,
+): string {
   if (!result.ok) {
     return `Failed to retrieve patient clinical summary: ${result.error ?? "Unknown Neo4j error."}`;
   }
@@ -682,13 +739,17 @@ function formatNeo4jPatientClinicalSummaryToolOutput(result: Neo4jPatientClinica
   ].join("\n");
 }
 
-function formatNeo4jPrescriptionSafetyToolOutput(result: Neo4jPrescriptionSafetyResult): string {
+function formatNeo4jPrescriptionSafetyToolOutput(
+  result: Neo4jPrescriptionSafetyResult,
+): string {
   if (!result.ok) {
     return `Failed to verify prescription safety: ${result.error ?? "Unknown Neo4j error."}`;
   }
 
   const allergies =
-    result.warningAllergies.length > 0 ? result.warningAllergies.join(", ") : "None detected";
+    result.warningAllergies.length > 0
+      ? result.warningAllergies.join(", ")
+      : "None detected";
   const interactions =
     result.warningInteractions.length > 0
       ? result.warningInteractions.join(", ")
@@ -713,7 +774,9 @@ function formatNeo4jPrescriptionSafetyToolOutput(result: Neo4jPrescriptionSafety
   ].join("\n");
 }
 
-function formatNeo4jSafeAlternativesToolOutput(result: Neo4jSafeAlternativesResult): string {
+function formatNeo4jSafeAlternativesToolOutput(
+  result: Neo4jSafeAlternativesResult,
+): string {
   if (!result.ok) {
     return `Failed to suggest safe alternatives: ${result.error ?? "Unknown Neo4j error."}`;
   }
@@ -770,7 +833,9 @@ function formatStructuredToolOutput(result: StructuredToolResult): string {
   return `Tool executed successfully for metric: ${result.resolvedMetric ?? "unknown"}\n\nResults:\n${chunksText}`;
 }
 
-function formatLatestReportsToolOutput(result: LatestReportsToolResult): string {
+function formatLatestReportsToolOutput(
+  result: LatestReportsToolResult,
+): string {
   if (!result.ok) {
     return `Failed to get reports: ${result.error ?? "Unknown latest report retrieval error."}`;
   }
@@ -788,14 +853,17 @@ function trimToolResultText(value: string, maxChars: number): string {
 }
 
 function boundToolResultChunks(
-  chunks: Array<{ title: string; text: string; score?: number }>
+  chunks: Array<{ title: string; text: string; score?: number }>,
 ): Array<{ title: string; text: string; score?: number }> {
   const limitedByCount = chunks.slice(0, TOOL_RESULT_MAX_CHUNKS);
   let totalChars = 0;
   const bounded: Array<{ title: string; text: string; score?: number }> = [];
 
   for (const chunk of limitedByCount) {
-    const boundedText = trimToolResultText(chunk.text, TOOL_RESULT_MAX_CHUNK_CHARS);
+    const boundedText = trimToolResultText(
+      chunk.text,
+      TOOL_RESULT_MAX_CHUNK_CHARS,
+    );
     const projected = totalChars + chunk.title.length + boundedText.length;
 
     if (projected > TOOL_RESULT_MAX_TOTAL_CHARS) {
@@ -815,7 +883,10 @@ function boundToolResultChunks(
     return [
       {
         title: first.title,
-        text: trimToolResultText(first.text, Math.min(TOOL_RESULT_MAX_CHUNK_CHARS, 1200)),
+        text: trimToolResultText(
+          first.text,
+          Math.min(TOOL_RESULT_MAX_CHUNK_CHARS, 1200),
+        ),
         score: first.score,
       },
     ];
@@ -824,8 +895,7 @@ function boundToolResultChunks(
   if (bounded.length < chunks.length) {
     bounded.push({
       title: "Structured tool output note",
-      text:
-        "Tool output was truncated for model stability. Ask follow-up requests for additional rows or narrower time windows.",
+      text: "Tool output was truncated for model stability. Ask follow-up requests for additional rows or narrower time windows.",
       score: 1,
     });
   }
@@ -867,7 +937,7 @@ function tokenOverlapScore(a: string, b: string): number {
 
 function levenshteinDistance(a: string, b: string): number {
   const matrix: number[][] = Array.from({ length: a.length + 1 }, () =>
-    Array.from({ length: b.length + 1 }, () => 0)
+    Array.from({ length: b.length + 1 }, () => 0),
   );
 
   for (let i = 0; i <= a.length; i += 1) {
@@ -883,7 +953,7 @@ function levenshteinDistance(a: string, b: string): number {
       matrix[i][j] = Math.min(
         matrix[i - 1][j] + 1,
         matrix[i][j - 1] + 1,
-        matrix[i - 1][j - 1] + cost
+        matrix[i - 1][j - 1] + cost,
       );
     }
   }
@@ -912,7 +982,10 @@ function getMetricAliasCandidates(metricQuery: string): string[] {
     .filter((value): value is string => Boolean(value && value.length > 0))
     .map((value) => normalizeMetricKey(value));
 
-  const canonicalCandidates = [resolution.canonicalKey, resolution.suggestedCanonicalKey]
+  const canonicalCandidates = [
+    resolution.canonicalKey,
+    resolution.suggestedCanonicalKey,
+  ]
     .filter((value): value is string => Boolean(value && value.length > 0))
     .map((value) => normalizeMetricKey(value));
 
@@ -922,7 +995,9 @@ function getMetricAliasCandidates(metricQuery: string): string[] {
       return [];
     }
 
-    return [definition.canonicalKey, ...definition.aliases].map((item) => normalizeMetricKey(item));
+    return [definition.canonicalKey, ...definition.aliases].map((item) =>
+      normalizeMetricKey(item),
+    );
   });
 
   return Array.from(new Set([...directCandidates, ...expandedAliases]));
@@ -930,17 +1005,25 @@ function getMetricAliasCandidates(metricQuery: string): string[] {
 
 function resolveMetricAgainstCatalog(
   metricQuery: string,
-  patientMetricCatalog: string[]
-): { matchedMetric: string | null; strategy: "exact" | "contains" | "fuzzy" | "none"; score: number } {
+  patientMetricCatalog: string[],
+): {
+  matchedMetric: string | null;
+  strategy: "exact" | "contains" | "fuzzy" | "none";
+  score: number;
+} {
   if (!metricQuery || patientMetricCatalog.length === 0) {
     return { matchedMetric: null, strategy: "none", score: 0 };
   }
 
-  const catalog = Array.from(new Set(patientMetricCatalog.map((item) => normalizeMetricKey(item))));
+  const catalog = Array.from(
+    new Set(patientMetricCatalog.map((item) => normalizeMetricKey(item))),
+  );
   const catalogSet = new Set(catalog);
   const aliasCandidates = getMetricAliasCandidates(metricQuery);
 
-  const exactMatch = aliasCandidates.find((candidate) => catalogSet.has(candidate));
+  const exactMatch = aliasCandidates.find((candidate) =>
+    catalogSet.has(candidate),
+  );
   if (exactMatch) {
     return {
       matchedMetric: exactMatch,
@@ -952,8 +1035,9 @@ function resolveMetricAgainstCatalog(
   const containsMatch = catalog.find((metricKey) =>
     aliasCandidates.some(
       (candidate) =>
-        candidate.length >= 4 && (metricKey.includes(candidate) || candidate.includes(metricKey))
-    )
+        candidate.length >= 4 &&
+        (metricKey.includes(candidate) || candidate.includes(metricKey)),
+    ),
   );
   if (containsMatch) {
     return {
@@ -968,7 +1052,8 @@ function resolveMetricAgainstCatalog(
       metricKey,
       score: aliasCandidates.reduce((best, candidate) => {
         const overlap = tokenOverlapScore(candidate, metricKey);
-        const typoSimilarity = normalizedLevenshteinSimilarity(candidate, metricKey) * 0.9;
+        const typoSimilarity =
+          normalizedLevenshteinSimilarity(candidate, metricKey) * 0.9;
         return Math.max(best, overlap, typoSimilarity);
       }, 0),
     }))
@@ -988,7 +1073,7 @@ function resolveMetricAgainstCatalog(
 
 async function getPatientMetricCatalog(
   patientUserId: string,
-  requestedCatalog: string[] | null | undefined
+  requestedCatalog: string[] | null | undefined,
 ): Promise<string[]> {
   const fromContext = Array.isArray(requestedCatalog)
     ? requestedCatalog
@@ -1018,12 +1103,14 @@ async function getPatientMetricCatalog(
       rows
         .map((row) => row.keyNormalized)
         .filter((value): value is string => Boolean(value && value.length > 0))
-        .map((value) => normalizeMetricKey(value))
-    )
+        .map((value) => normalizeMetricKey(value)),
+    ),
   );
 }
 
-async function resolvePatientUserId(chatContext: ChatContextPayload): Promise<string | null> {
+async function resolvePatientUserId(
+  chatContext: ChatContextPayload,
+): Promise<string | null> {
   const directUserId = chatContext.patientUserId?.trim() || null;
   if (directUserId) {
     return directUserId;
@@ -1062,7 +1149,7 @@ async function resolvePatientUserId(chatContext: ChatContextPayload): Promise<st
 
 async function resolveNeo4jPatientIdentifier(
   chatContext: ChatContextPayload,
-  resolvedPatientUserId: string | null
+  resolvedPatientUserId: string | null,
 ): Promise<string | null> {
   const HARD_CODED_NEO4J_PATIENT_ID = "38cc16ef-8b17-4841-985e-bdafe4c92e37";
 
@@ -1116,13 +1203,20 @@ async function resolveNeo4jPatientIdentifier(
   addCandidate(resolvedPatientUserId);
 
   const resolved = candidates[0] ?? null;
-  console.info("[Neo4j] Resolved patient identifier candidates:", candidates, "selected:", resolved, "HARD_CODED:", HARD_CODED_NEO4J_PATIENT_ID);
+  console.info(
+    "[Neo4j] Resolved patient identifier candidates:",
+    candidates,
+    "selected:",
+    resolved,
+    "HARD_CODED:",
+    HARD_CODED_NEO4J_PATIENT_ID,
+  );
   return HARD_CODED_NEO4J_PATIENT_ID;
 }
 
 async function runStructuredOnlyRetrieval(
   latestUserQuery: string,
-  chatContext: ChatContextPayload
+  chatContext: ChatContextPayload,
 ): Promise<{
   classifiedIntent: ClassifiedIntent;
   structuredResult: StructuredRetrievalResult | null;
@@ -1137,8 +1231,7 @@ async function runStructuredOnlyRetrieval(
       structuredChunks: [
         {
           title: "Structured retrieval mode",
-          text:
-            "Structured-only mode is enabled. Ask for a concrete patient metric such as latest hemoglobin, creatinine trend, DLC history, or abnormal readings.",
+          text: "Structured-only mode is enabled. Ask for a concrete patient metric such as latest hemoglobin, creatinine trend, DLC history, or abnormal readings.",
           score: 1,
         },
       ],
@@ -1153,8 +1246,7 @@ async function runStructuredOnlyRetrieval(
       structuredChunks: [
         {
           title: "Missing patient context",
-          text:
-            "A metric intent was detected but no patient user id was available in chat context, so structured retrieval could not be executed.",
+          text: "A metric intent was detected but no patient user id was available in chat context, so structured retrieval could not be executed.",
           score: 1,
         },
       ],
@@ -1163,14 +1255,21 @@ async function runStructuredOnlyRetrieval(
 
   const patientMetricCatalog = await getPatientMetricCatalog(
     patientUserId,
-    chatContext.patientMetricCatalog
+    chatContext.patientMetricCatalog,
   );
 
   const mapping = classifiedIntent.metricQuery
-    ? resolveMetricAgainstCatalog(classifiedIntent.metricQuery, patientMetricCatalog)
+    ? resolveMetricAgainstCatalog(
+        classifiedIntent.metricQuery,
+        patientMetricCatalog,
+      )
     : { matchedMetric: null, strategy: "none" as const, score: 0 };
 
-  if (classifiedIntent.metricQuery && patientMetricCatalog.length > 0 && !mapping.matchedMetric) {
+  if (
+    classifiedIntent.metricQuery &&
+    patientMetricCatalog.length > 0 &&
+    !mapping.matchedMetric
+  ) {
     const preview = patientMetricCatalog.slice(0, 40).join(", ");
 
     return {
@@ -1191,15 +1290,22 @@ async function runStructuredOnlyRetrieval(
     };
   }
 
-  const effectiveMetricQuery = mapping.matchedMetric ?? classifiedIntent.metricQuery;
+  const effectiveMetricQuery =
+    mapping.matchedMetric ?? classifiedIntent.metricQuery;
 
-  const structuredResult = await runStructuredRetrievalForPatient(patientUserId, {
-    intent: classifiedIntent.intent as Exclude<typeof classifiedIntent.intent, "GENERAL">,
-    metricQuery: effectiveMetricQuery,
-    timeWindowDays: classifiedIntent.timeWindowDays,
-    startDate: classifiedIntent.startDate,
-    endDate: classifiedIntent.endDate,
-  });
+  const structuredResult = await runStructuredRetrievalForPatient(
+    patientUserId,
+    {
+      intent: classifiedIntent.intent as Exclude<
+        typeof classifiedIntent.intent,
+        "GENERAL"
+      >,
+      metricQuery: effectiveMetricQuery,
+      timeWindowDays: classifiedIntent.timeWindowDays,
+      startDate: classifiedIntent.startDate,
+      endDate: classifiedIntent.endDate,
+    },
+  );
 
   const structuredChunks = structuredResultToChunks(structuredResult, {
     maxItems: STRUCTURED_HISTORY_MAX_ITEMS,
@@ -1235,7 +1341,7 @@ async function executeStructuredRetrievalTool(
   context: {
     patientUserId: string | null;
     patientMetricCatalog: string[];
-  }
+  },
 ): Promise<StructuredToolResult> {
   if (!context.patientUserId) {
     return {
@@ -1247,8 +1353,7 @@ async function executeStructuredRetrievalTool(
       structuredChunks: [
         {
           title: "Missing patient context",
-          text:
-            "No patient user id was available in chat context, so structured retrieval could not be executed.",
+          text: "No patient user id was available in chat context, so structured retrieval could not be executed.",
           score: 1,
         },
       ],
@@ -1316,13 +1421,16 @@ async function executeStructuredRetrievalTool(
   const effectiveMetricQuery = mapping.matchedMetric ?? requestedMetric;
 
   try {
-    const structuredResult = await runStructuredRetrievalForPatient(context.patientUserId, {
-      intent: input.intent,
-      metricQuery: effectiveMetricQuery ?? undefined,
-      timeWindowDays: input.timeWindowDays,
-      startDate: input.startDate,
-      endDate: input.endDate,
-    });
+    const structuredResult = await runStructuredRetrievalForPatient(
+      context.patientUserId,
+      {
+        intent: input.intent,
+        metricQuery: effectiveMetricQuery ?? undefined,
+        timeWindowDays: input.timeWindowDays,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      },
+    );
 
     const structuredChunks = structuredResultToChunks(structuredResult, {
       maxItems: STRUCTURED_HISTORY_MAX_ITEMS,
@@ -1365,7 +1473,10 @@ async function executeStructuredRetrievalTool(
       ]),
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown structured retrieval error.";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown structured retrieval error.";
     return {
       ok: false,
       intent: input.intent,
@@ -1416,19 +1527,20 @@ async function executeLatestReportsTool(context: {
           },
         },
       },
-      orderBy: [
-        { reportDate: "desc" },
-        { createdAt: "desc" },
-      ],
+      orderBy: [{ reportDate: "desc" }, { createdAt: "desc" }],
       take: maxReports,
     });
 
     const normalizedReports = reports.map((report) => {
-      const reportLink = report.reportURL?.trim() ? report.reportURL.trim() : null;
+      const reportLink = report.reportURL?.trim()
+        ? report.reportURL.trim()
+        : null;
       return {
         id: report.id,
         title: report.document.title,
-        reportDate: report.reportDate ? report.reportDate.toISOString().slice(0, 10) : null,
+        reportDate: report.reportDate
+          ? report.reportDate.toISOString().slice(0, 10)
+          : null,
         createdAt: report.createdAt.toISOString(),
         hospitalName: report.hospitalName,
         reportLink,
@@ -1440,7 +1552,9 @@ async function executeLatestReportsTool(context: {
           "| Date | Title | Hospital | Link |",
           "| --- | --- | --- | --- |",
           ...normalizedReports.map((item) => {
-            const linkCell = item.reportLink ? `[Open report](${item.reportLink})` : "No link";
+            const linkCell = item.reportLink
+              ? `[Open report](${item.reportLink})`
+              : "No link";
             return `| ${item.reportDate ?? "n/a"} | ${item.title} | ${item.hospitalName ?? "n/a"} | ${linkCell} |`;
           }),
         ].join("\n")
@@ -1453,7 +1567,10 @@ async function executeLatestReportsTool(context: {
       latestReportsTable,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown report retrieval error.";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown report retrieval error.";
     return {
       ok: false,
       maxReports,
@@ -1504,7 +1621,10 @@ async function executeLastSessionTranscriptTool(context: {
       entryCount: result.transcript?.length ?? 0,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown transcript retrieval error.";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown transcript retrieval error.";
     return {
       ok: false,
       appointmentId: null,
@@ -1553,7 +1673,10 @@ async function executeLastSoapNoteTool(context: {
       soapNoteText,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown SOAP note retrieval error.";
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unknown SOAP note retrieval error.";
     return {
       ok: false,
       appointmentId: null,
@@ -1570,19 +1693,30 @@ async function executeNeo4jPatientClinicalSummaryTool(
   },
   context: {
     resolvedPatientId: string | null;
-  }
+  },
 ): Promise<Neo4jPatientClinicalSummaryResult> {
   const patientId = input.patientId?.trim() || context.resolvedPatientId || "";
-  console.info("[Neo4j Tool] get_patient_clinical_summary — input.patientId:", input.patientId, "resolvedPatientId:", context.resolvedPatientId, "effective:", patientId);
+  console.info(
+    "[Neo4j Tool] get_patient_clinical_summary — input.patientId:",
+    input.patientId,
+    "resolvedPatientId:",
+    context.resolvedPatientId,
+    "effective:",
+    patientId,
+  );
 
   if (!patientId) {
-    console.warn("[Neo4j Tool] get_patient_clinical_summary aborted — no patientId resolved.");
+    console.warn(
+      "[Neo4j Tool] get_patient_clinical_summary aborted — no patientId resolved.",
+    );
     return {
       ok: false,
       patientId: "",
       rows: [],
-      summaryTable: "Could not resolve patient identifier from clinical session context.",
-      error: "patientId is required or must be resolvable from chatContext.appointmentId.",
+      summaryTable:
+        "Could not resolve patient identifier from clinical session context.",
+      error:
+        "patientId is required or must be resolvable from chatContext.appointmentId.",
     };
   }
 
@@ -1591,7 +1725,10 @@ async function executeNeo4jPatientClinicalSummaryTool(
   });
 
   if (!queryResult.ok) {
-    console.warn("[Neo4j Tool] get_patient_clinical_summary query failed:", queryResult.error);
+    console.warn(
+      "[Neo4j Tool] get_patient_clinical_summary query failed:",
+      queryResult.error,
+    );
     return {
       ok: false,
       patientId,
@@ -1601,19 +1738,32 @@ async function executeNeo4jPatientClinicalSummaryTool(
     };
   }
 
-  const rows = queryResult.rows.slice(0, NEO4J_TOOL_RESULT_MAX_ROWS).map((row) => ({
-    category: typeof row.Category === "string" && row.Category.trim() ? row.Category.trim() : "Unknown",
-    item: typeof row.Item === "string" && row.Item.trim() ? row.Item.trim() : "Unknown",
-    date: row.Date == null ? null : String(row.Date),
-  }));
+  const rows = queryResult.rows
+    .slice(0, NEO4J_TOOL_RESULT_MAX_ROWS)
+    .map((row) => ({
+      category:
+        typeof row.Category === "string" && row.Category.trim()
+          ? row.Category.trim()
+          : "Unknown",
+      item:
+        typeof row.Item === "string" && row.Item.trim()
+          ? row.Item.trim()
+          : "Unknown",
+      date: row.Date == null ? null : String(row.Date),
+    }));
 
-  console.info("[Neo4j Tool] get_patient_clinical_summary — mapped rows:", rows.length);
+  console.info(
+    "[Neo4j Tool] get_patient_clinical_summary — mapped rows:",
+    rows.length,
+  );
 
   const summaryTable = rows.length
     ? [
         "| Category | Item | Date |",
         "| --- | --- | --- |",
-        ...rows.map((row) => `| ${row.category} | ${row.item} | ${row.date ?? "n/a"} |`),
+        ...rows.map(
+          (row) => `| ${row.category} | ${row.item} | ${row.date ?? "n/a"} |`,
+        ),
       ].join("\n")
     : "No clinical summary rows found for this patient filter.";
 
@@ -1632,14 +1782,25 @@ async function executeNeo4jVerifyPrescriptionSafetyTool(
   },
   context: {
     resolvedPatientId: string | null;
-  }
+  },
 ): Promise<Neo4jPrescriptionSafetyResult> {
   const patientId = input.patientId?.trim() || context.resolvedPatientId || "";
   const proposedDrug = input.proposedDrug.trim();
-  console.info("[Neo4j Tool] verify_prescription_safety — input.patientId:", input.patientId, "resolvedPatientId:", context.resolvedPatientId, "effective:", patientId, "proposedDrug:", proposedDrug);
+  console.info(
+    "[Neo4j Tool] verify_prescription_safety — input.patientId:",
+    input.patientId,
+    "resolvedPatientId:",
+    context.resolvedPatientId,
+    "effective:",
+    patientId,
+    "proposedDrug:",
+    proposedDrug,
+  );
 
   if (!patientId || !proposedDrug) {
-    console.warn("[Neo4j Tool] verify_prescription_safety aborted — missing patientId or proposedDrug.");
+    console.warn(
+      "[Neo4j Tool] verify_prescription_safety aborted — missing patientId or proposedDrug.",
+    );
     return {
       ok: false,
       patientId,
@@ -1659,7 +1820,10 @@ async function executeNeo4jVerifyPrescriptionSafetyTool(
   });
 
   if (!queryResult.ok) {
-    console.warn("[Neo4j Tool] verify_prescription_safety query failed:", queryResult.error);
+    console.warn(
+      "[Neo4j Tool] verify_prescription_safety query failed:",
+      queryResult.error,
+    );
     return {
       ok: false,
       patientId,
@@ -1674,7 +1838,12 @@ async function executeNeo4jVerifyPrescriptionSafetyTool(
 
   const firstRow = queryResult.rows[0];
   if (!firstRow) {
-    console.warn("[Neo4j Tool] verify_prescription_safety — no rows returned for patientId:", patientId, "proposedDrug:", proposedDrug);
+    console.warn(
+      "[Neo4j Tool] verify_prescription_safety — no rows returned for patientId:",
+      patientId,
+      "proposedDrug:",
+      proposedDrug,
+    );
     return {
       ok: false,
       patientId,
@@ -1683,18 +1852,23 @@ async function executeNeo4jVerifyPrescriptionSafetyTool(
       warningAllergies: [],
       warningInteractions: [],
       warningContraindications: [],
-      error: "No Neo4j result rows found. Confirm patient and drug exist in graph.",
+      error:
+        "No Neo4j result rows found. Confirm patient and drug exist in graph.",
     };
   }
 
-  console.info("[Neo4j Tool] verify_prescription_safety — first row:", firstRow);
+  console.info(
+    "[Neo4j Tool] verify_prescription_safety — first row:",
+    firstRow,
+  );
 
   return {
     ok: true,
     patientId,
     proposedDrug,
     proposedMedicine:
-      typeof firstRow.ProposedMedicine === "string" && firstRow.ProposedMedicine.trim()
+      typeof firstRow.ProposedMedicine === "string" &&
+      firstRow.ProposedMedicine.trim()
         ? firstRow.ProposedMedicine.trim()
         : null,
     warningAllergies: toStringArray(firstRow.Warning_Allergies),
@@ -1710,14 +1884,25 @@ async function executeNeo4jSuggestSafeAlternativesTool(
   },
   context: {
     resolvedPatientId: string | null;
-  }
+  },
 ): Promise<Neo4jSafeAlternativesResult> {
   const patientId = input.patientId?.trim() || context.resolvedPatientId || "";
   const diseaseName = input.diseaseName.trim();
-  console.info("[Neo4j Tool] suggest_safe_alternatives — input.patientId:", input.patientId, "resolvedPatientId:", context.resolvedPatientId, "effective:", patientId, "diseaseName:", diseaseName);
+  console.info(
+    "[Neo4j Tool] suggest_safe_alternatives — input.patientId:",
+    input.patientId,
+    "resolvedPatientId:",
+    context.resolvedPatientId,
+    "effective:",
+    patientId,
+    "diseaseName:",
+    diseaseName,
+  );
 
   if (!patientId || !diseaseName) {
-    console.warn("[Neo4j Tool] suggest_safe_alternatives aborted — missing patientId or diseaseName.");
+    console.warn(
+      "[Neo4j Tool] suggest_safe_alternatives aborted — missing patientId or diseaseName.",
+    );
     return {
       ok: false,
       patientId,
@@ -1736,7 +1921,10 @@ async function executeNeo4jSuggestSafeAlternativesTool(
   });
 
   if (!queryResult.ok) {
-    console.warn("[Neo4j Tool] suggest_safe_alternatives query failed:", queryResult.error);
+    console.warn(
+      "[Neo4j Tool] suggest_safe_alternatives query failed:",
+      queryResult.error,
+    );
     return {
       ok: false,
       patientId,
@@ -1747,16 +1935,22 @@ async function executeNeo4jSuggestSafeAlternativesTool(
     };
   }
 
-  const alternatives = queryResult.rows.slice(0, NEO4J_TOOL_RESULT_MAX_ROWS).map((row) => ({
-    safeAlternative:
-      typeof row.SafeAlternative === "string" && row.SafeAlternative.trim()
-        ? row.SafeAlternative.trim()
-        : "Unknown",
-    foundVia: row.FoundVia == null ? null : String(row.FoundVia),
-    treatmentDetails: row.TreatmentDetails == null ? null : String(row.TreatmentDetails),
-  }));
+  const alternatives = queryResult.rows
+    .slice(0, NEO4J_TOOL_RESULT_MAX_ROWS)
+    .map((row) => ({
+      safeAlternative:
+        typeof row.SafeAlternative === "string" && row.SafeAlternative.trim()
+          ? row.SafeAlternative.trim()
+          : "Unknown",
+      foundVia: row.FoundVia == null ? null : String(row.FoundVia),
+      treatmentDetails:
+        row.TreatmentDetails == null ? null : String(row.TreatmentDetails),
+    }));
 
-  console.info("[Neo4j Tool] suggest_safe_alternatives — mapped alternatives:", alternatives.length);
+  console.info(
+    "[Neo4j Tool] suggest_safe_alternatives — mapped alternatives:",
+    alternatives.length,
+  );
 
   const alternativesTable = alternatives.length
     ? [
@@ -1764,7 +1958,7 @@ async function executeNeo4jSuggestSafeAlternativesTool(
         "| --- | --- | --- |",
         ...alternatives.map(
           (row) =>
-            `| ${row.safeAlternative} | ${row.foundVia ?? "n/a"} | ${row.treatmentDetails ?? "n/a"} |`
+            `| ${row.safeAlternative} | ${row.foundVia ?? "n/a"} | ${row.treatmentDetails ?? "n/a"} |`,
         ),
       ].join("\n")
     : "No safe alternatives found for the provided disease and patient constraints.";
@@ -1780,7 +1974,7 @@ async function executeNeo4jSuggestSafeAlternativesTool(
 
 async function buildGroundedPrompt(
   messages: UIMessage[],
-  chatContext: ChatContextPayload = {}
+  chatContext: ChatContextPayload = {},
 ): Promise<{
   systemPrompt: string;
   userPrompt: string;
@@ -1790,13 +1984,18 @@ async function buildGroundedPrompt(
   if (!latestUserQuery) {
     return {
       systemPrompt: SYSTEM_PROMPT,
-      userPrompt: "Give a brief clinical greeting and ask one focused follow-up question.",
+      userPrompt:
+        "Give a brief clinical greeting and ask one focused follow-up question.",
     };
   }
 
-  let structuredChunks: Array<{ title: string; text: string; score?: number }> = [];
+  let structuredChunks: Array<{ title: string; text: string; score?: number }> =
+    [];
   try {
-    const structuredOnlyResult = await runStructuredOnlyRetrieval(latestUserQuery, chatContext);
+    const structuredOnlyResult = await runStructuredOnlyRetrieval(
+      latestUserQuery,
+      chatContext,
+    );
     structuredChunks = structuredOnlyResult.structuredChunks;
   } catch (error) {
     console.error("Structured-only retrieval failed", error);
@@ -1822,7 +2021,9 @@ async function buildGroundedPrompt(
   const promptPayload = buildGenerationPrompt({
     query: latestUserQuery,
     mergedContext,
-    patientContext: conversationContext ? `Recent chat:\n${conversationContext}` : undefined,
+    patientContext: conversationContext
+      ? `Recent chat:\n${conversationContext}`
+      : undefined,
     responseStyle: "concise",
   });
 
@@ -1860,33 +2061,49 @@ export async function POST(request: Request) {
       const greetingResult = streamText({
         model: ragModelProvider.chat(RAG_MODEL_NAME),
         system: SYSTEM_PROMPT,
-        prompt: "Give a brief clinical greeting and ask one focused follow-up question. Do not offer to perform actions you cannot carry out after your greeting.",
+        prompt:
+          "Give a brief clinical greeting and ask one focused follow-up question. Do not offer to perform actions you cannot carry out after your greeting.",
       });
 
       return greetingResult.toUIMessageStreamResponse({
         sendReasoning: true,
         onError: (error) => {
-          console.error("AI chat stream failed", { requestId, mode: "greeting", error });
+          console.error("AI chat stream failed", {
+            requestId,
+            mode: "greeting",
+            error,
+          });
           return formatChatStreamError(error);
         },
       });
     }
 
     const patientUserId = await resolvePatientUserId(chatContext);
-    const neo4jPatientId = await resolveNeo4jPatientIdentifier(chatContext, patientUserId);
+    const neo4jPatientId = await resolveNeo4jPatientIdentifier(
+      chatContext,
+      patientUserId,
+    );
     const patientMetricCatalog = patientUserId
-      ? await getPatientMetricCatalog(patientUserId, chatContext.patientMetricCatalog)
+      ? await getPatientMetricCatalog(
+          patientUserId,
+          chatContext.patientMetricCatalog,
+        )
       : [];
 
     // Semantic retrieval mode: direct RAG via vector search, no tool-calling.
     if (chatContext.retrievalMode === "semantic") {
       try {
         const semanticRetrievalStartedAt = Date.now();
-        const semanticResults = await searchVectorDatabase(latestUserQuery, SEMANTIC_RETRIEVAL_TOP_K, "all", {
-          includePatientDocuments: true,
-          patientUserId,
-          patientProfileId: chatContext.patientProfileId ?? null,
-        });
+        const semanticResults = await searchVectorDatabase(
+          latestUserQuery,
+          SEMANTIC_RETRIEVAL_TOP_K,
+          "all",
+          {
+            includePatientDocuments: true,
+            patientUserId,
+            patientProfileId: chatContext.patientProfileId ?? null,
+          },
+        );
 
         const semanticChunks = semanticResults.map((result) => ({
           parentChunkId: result.parentChunkId,
@@ -1909,7 +2126,9 @@ export async function POST(request: Request) {
         const promptPayload = buildGenerationPrompt({
           query: latestUserQuery,
           mergedContext,
-          patientContext: conversationContext ? `Recent chat:\n${conversationContext}` : undefined,
+          patientContext: conversationContext
+            ? `Recent chat:\n${conversationContext}`
+            : undefined,
           responseStyle: "concise",
         });
 
@@ -1931,11 +2150,22 @@ export async function POST(request: Request) {
           maxOutputTokens: SEMANTIC_MAX_OUTPUT_TOKENS,
           system: [
             SYSTEM_PROMPT,
-            promptPayload.systemPrompt,
-            "You are in semantic retrieval mode. Ground every statement in the retrieved document passages.",
-            "Cite sources by document title when possible.",
-            "If the retrieved passages do not contain relevant information, state that clearly and do not speculate.",
-            "Do not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.",
+            "Before executing ANY tool or providing a final answer, you MUST think step-by-step.",
+            "Enclose your internal routing logic strictly inside <think> and </think> tags.",
+            "After closing the </think> tag, you may either output a tool call or your final summarized response.",
+            "TOOL ROUTING RULES:",
+            "- For direct latest-value requests, use structuredLatestMetric.",
+            "- For history, trend, and abnormal requests, use structuredRetrieval.",
+            "- For recent report summary requests, use getLatestReports.",
+            "- For previous session conversations, use retrieveLastSession.",
+            "- For previous visit SOAP notes, use getLastSoapNote.",
+            "- For patient overviews, allergies, or medication lists, use get_patient_clinical_summary.",
+            "- To check a specific drug in a prescribing context, use verify_prescription_safety.",
+            "- To find treatment alternatives, use suggest_safe_alternatives.",
+            "FINAL OUTPUT RULES:",
+            "- Output ONLY the data returned by the tools.",
+            "- Use markdown tables for tool-provided history/reports.",
+            "- NEVER add your own 'Clinical Notes', 'Recommendations', or 'Manual Reviews'.",
           ].join("\n"),
           prompt: promptPayload.userPrompt,
         });
@@ -1960,7 +2190,11 @@ export async function POST(request: Request) {
             }
           },
           onError: (error) => {
-            console.error("AI chat stream failed", { requestId, mode: "semantic-rag", error });
+            console.error("AI chat stream failed", {
+              requestId,
+              mode: "semantic-rag",
+              error,
+            });
             return formatChatStreamError(error);
           },
         });
@@ -1974,16 +2208,20 @@ export async function POST(request: Request) {
     if (!patientUserId) {
       const groundedPrompt = await buildGroundedPrompt(messages, chatContext);
 
-        const fallbackResult = streamText({
-          model: ragModelProvider.chat(RAG_MODEL_NAME),
-          system: `${groundedPrompt.systemPrompt}\nDo not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.`,
-          prompt: groundedPrompt.userPrompt,
-        });
+      const fallbackResult = streamText({
+        model: ragModelProvider.chat(RAG_MODEL_NAME),
+        system: `${groundedPrompt.systemPrompt}\nDo not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.`,
+        prompt: groundedPrompt.userPrompt,
+      });
 
-        return fallbackResult.toUIMessageStreamResponse({
-          sendReasoning: true,
-          onError: (error) => {
-            console.error("AI chat stream failed", { requestId, mode: "fallback-no-patient", error });
+      return fallbackResult.toUIMessageStreamResponse({
+        sendReasoning: true,
+        onError: (error) => {
+          console.error("AI chat stream failed", {
+            requestId,
+            mode: "fallback-no-patient",
+            error,
+          });
           return formatChatStreamError(error);
         },
       });
@@ -1993,16 +2231,20 @@ export async function POST(request: Request) {
     if (!STRUCTURED_TOOL_CALLING_ENABLED) {
       const groundedPrompt = await buildGroundedPrompt(messages, chatContext);
 
-        const fallbackResult = streamText({
-          model: ragModelProvider.chat(RAG_MODEL_NAME),
-          system: `${groundedPrompt.systemPrompt}\nDo not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.`,
-          prompt: groundedPrompt.userPrompt,
-        });
+      const fallbackResult = streamText({
+        model: ragModelProvider.chat(RAG_MODEL_NAME),
+        system: `${groundedPrompt.systemPrompt}\nDo not offer to perform actions you cannot carry out (such as generating charts, creating documents, or using tools beyond those explicitly provided to you). Do not ask if the user wants you to do anything else at the end of your response.`,
+        prompt: groundedPrompt.userPrompt,
+      });
 
-        return fallbackResult.toUIMessageStreamResponse({
-          sendReasoning: true,
-          onError: (error) => {
-            console.error("AI chat stream failed", { requestId, mode: "fallback-tooling-disabled", error });
+      return fallbackResult.toUIMessageStreamResponse({
+        sendReasoning: true,
+        onError: (error) => {
+          console.error("AI chat stream failed", {
+            requestId,
+            mode: "fallback-tooling-disabled",
+            error,
+          });
           return formatChatStreamError(error);
         },
       });
@@ -2013,6 +2255,7 @@ export async function POST(request: Request) {
     const toolResult = streamText({
       // Force chat completions so SDK does not call /v1/responses.
       model: ragModelProvider.chat(RAG_MODEL_NAME),
+      temperature: 0.4,
       system: [
         SYSTEM_PROMPT,
         "You can use retrieval tools to answer patient metric questions.",
@@ -2045,7 +2288,9 @@ export async function POST(request: Request) {
             metricQuery: z
               .string()
               .min(1)
-              .describe("Normalized or natural-language metric name, for example hemoglobin."),
+              .describe(
+                "Normalized or natural-language metric name, for example hemoglobin.",
+              ),
             timeWindowDays: z
               .number()
               .int()
@@ -2061,7 +2306,12 @@ export async function POST(request: Request) {
               .optional()
               .describe("Optional ISO end date (YYYY-MM-DD)."),
           }),
-          execute: async ({ metricQuery, timeWindowDays, startDate, endDate }) =>
+          execute: async ({
+            metricQuery,
+            timeWindowDays,
+            startDate,
+            endDate,
+          }) =>
             formatStructuredToolOutput(
               await executeStructuredRetrievalTool(
                 {
@@ -2074,8 +2324,8 @@ export async function POST(request: Request) {
                 {
                   patientUserId,
                   patientMetricCatalog,
-                }
-              )
+                },
+              ),
             ),
         }),
         structuredRetrieval: tool({
@@ -2088,7 +2338,9 @@ export async function POST(request: Request) {
             metricQuery: z
               .string()
               .optional()
-              .describe("Metric name; required for latest/history/trend and optional for abnormal readings."),
+              .describe(
+                "Metric name; required for latest/history/trend and optional for abnormal readings.",
+              ),
             timeWindowDays: z
               .number()
               .int()
@@ -2104,7 +2356,13 @@ export async function POST(request: Request) {
               .optional()
               .describe("Optional ISO end date (YYYY-MM-DD)."),
           }),
-          execute: async ({ intent, metricQuery, timeWindowDays, startDate, endDate }) =>
+          execute: async ({
+            intent,
+            metricQuery,
+            timeWindowDays,
+            startDate,
+            endDate,
+          }) =>
             formatStructuredToolOutput(
               await executeStructuredRetrievalTool(
                 {
@@ -2117,8 +2375,8 @@ export async function POST(request: Request) {
                 {
                   patientUserId,
                   patientMetricCatalog,
-                }
-              )
+                },
+              ),
             ),
         }),
         getLatestReports: tool({
@@ -2129,7 +2387,7 @@ export async function POST(request: Request) {
             formatLatestReportsToolOutput(
               await executeLatestReportsTool({
                 patientUserId,
-              })
+              }),
             ),
         }),
         retrieveLastSession: tool({
@@ -2140,7 +2398,7 @@ export async function POST(request: Request) {
             formatLastSessionToolOutput(
               await executeLastSessionTranscriptTool({
                 appointmentId: chatContext.appointmentId ?? null,
-              })
+              }),
             ),
         }),
         getLastSoapNote: tool({
@@ -2151,7 +2409,7 @@ export async function POST(request: Request) {
             formatLastSoapNoteToolOutput(
               await executeLastSoapNoteTool({
                 appointmentId: chatContext.appointmentId ?? null,
-              })
+              }),
             ),
         }),
         get_patient_clinical_summary: tool({
@@ -2161,7 +2419,9 @@ export async function POST(request: Request) {
             patientId: z
               .string()
               .optional()
-              .describe("Optional patient identifier override. If omitted, resolved from chat context/clinical session."),
+              .describe(
+                "Optional patient identifier override. If omitted, resolved from chat context/clinical session.",
+              ),
           }),
           execute: async ({ patientId }) =>
             formatNeo4jPatientClinicalSummaryToolOutput(
@@ -2171,8 +2431,8 @@ export async function POST(request: Request) {
                 },
                 {
                   resolvedPatientId: neo4jPatientId,
-                }
-              )
+                },
+              ),
             ),
         }),
         verify_prescription_safety: tool({
@@ -2182,7 +2442,9 @@ export async function POST(request: Request) {
             patientId: z
               .string()
               .optional()
-              .describe("Optional patient identifier override. If omitted, resolved from chat context/clinical session."),
+              .describe(
+                "Optional patient identifier override. If omitted, resolved from chat context/clinical session.",
+              ),
             proposedDrug: z
               .string()
               .min(1)
@@ -2197,8 +2459,8 @@ export async function POST(request: Request) {
                 },
                 {
                   resolvedPatientId: neo4jPatientId,
-                }
-              )
+                },
+              ),
             ),
         }),
         suggest_safe_alternatives: tool({
@@ -2208,11 +2470,15 @@ export async function POST(request: Request) {
             patientId: z
               .string()
               .optional()
-              .describe("Optional patient identifier override. If omitted, resolved from chat context/clinical session."),
+              .describe(
+                "Optional patient identifier override. If omitted, resolved from chat context/clinical session.",
+              ),
             diseaseName: z
               .string()
               .min(1)
-              .describe("Disease or condition name to find treatments for (e.g., hypertension, diabetes, bacterial infection)."),
+              .describe(
+                "Disease or condition name to find treatments for (e.g., hypertension, diabetes, bacterial infection).",
+              ),
           }),
           execute: async ({ patientId, diseaseName }) =>
             formatNeo4jSafeAlternativesToolOutput(
@@ -2223,8 +2489,8 @@ export async function POST(request: Request) {
                 },
                 {
                   resolvedPatientId: neo4jPatientId,
-                }
-              )
+                },
+              ),
             ),
         }),
       },
@@ -2254,7 +2520,11 @@ export async function POST(request: Request) {
     return toolResult.toUIMessageStreamResponse({
       sendReasoning: true,
       onError: (error) => {
-        console.error("AI chat stream failed", { requestId, mode: "tool-calling", error });
+        console.error("AI chat stream failed", {
+          requestId,
+          mode: "tool-calling",
+          error,
+        });
         return formatChatStreamError(error);
       },
     });
