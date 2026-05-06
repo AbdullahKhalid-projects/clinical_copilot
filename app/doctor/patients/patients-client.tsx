@@ -1,0 +1,492 @@
+"use client";
+
+import { useState } from "react";
+import {
+  Plus, 
+  MoreHorizontal, 
+  ArrowUpDown, 
+  ListTodo, 
+  Calendar as CalendarIcon,
+  Check,
+  User,
+  UserMinus,
+  Users,
+  Link2,
+  Loader2
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { format } from "date-fns";
+
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Calendar } from "@/components/ui/calendar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useToast } from "@/hooks/use-toast";
+import { linkPatientToAppointment } from "../clinical-session/actions";
+
+interface Patient {
+  id: string;
+  name: string;
+  initials: string;
+  email: string;
+  phone: string | null;
+  dateOfBirth: Date | null;
+  gender: string | null;
+  lastVisit: Date | null;
+  nextAppointment: Date | null;
+  status: "Upcoming" | "Past";
+  condition: string | null;
+}
+
+type LinkModeConfig = {
+  enabled: boolean;
+  appointmentId: string;
+  returnTo: string;
+};
+
+export default function PatientsClient({
+  patients,
+  linkMode,
+}: {
+  patients: Patient[];
+  linkMode?: LinkModeConfig;
+}) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [genderFilter, setGenderFilter] = useState<string | null>(null);
+  const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
+  const [linkingPatientId, setLinkingPatientId] = useState<string | null>(null);
+
+  const isLinkMode = Boolean(linkMode?.enabled && linkMode?.appointmentId);
+
+  const filteredPatients = patients.filter((patient) => {
+      const matchesSearch = 
+        patient.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        patient.email.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const matchesStatus = statusFilter ? patient.status === statusFilter : true;
+      
+      const matchesGender = genderFilter 
+        ? patient.gender?.toLowerCase() === genderFilter.toLowerCase() 
+        : true;
+
+      const matchesDate = dateFilter 
+        ? patient.lastVisit && new Date(patient.lastVisit).toDateString() === dateFilter.toDateString()
+        : true;
+
+      return matchesSearch && matchesStatus && matchesGender && matchesDate;
+  });
+
+  const handlePatientClick = (id: string) => {
+    if (isLinkMode) {
+      return;
+    }
+    router.push(`/doctor/patients/${id}`);
+  };
+
+  const handleLinkPatient = async (patientId: string) => {
+    if (!linkMode?.appointmentId || linkingPatientId) {
+      return;
+    }
+
+    setLinkingPatientId(patientId);
+    try {
+      const result = await linkPatientToAppointment(linkMode.appointmentId, patientId);
+      if (!result.success) {
+        toast({
+          title: "Link failed",
+          description: result.error || "Could not link patient to this session.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Patient linked",
+        description: "Returning to clinical session.",
+      });
+
+      router.push(linkMode.returnTo || `/doctor/clinical-session/${linkMode.appointmentId}`);
+    } catch (error) {
+      console.error("Failed to link patient", error);
+      toast({
+        title: "Link failed",
+        description: "Could not link patient to this session.",
+        variant: "destructive",
+      });
+    } finally {
+      setLinkingPatientId(null);
+    }
+  };
+
+  const formatDate = (date: Date | null) => {
+      if (!date) return "-";
+      return new Date(date).toLocaleDateString("en-US", {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+      });
+  }
+
+  const clearFilters = () => {
+      setSearchQuery("");
+      setStatusFilter(null);
+      setGenderFilter(null);
+      setDateFilter(undefined);
+  }
+
+  const hasFilters = searchQuery || statusFilter || genderFilter || dateFilter;
+
+  const upcomingCount = patients.filter(p => p.status === "Upcoming").length;
+  const totalPatients = patients.length;
+
+  return (
+    <div className="h-full flex-1 flex-col space-y-0 md:flex">
+      <header className="px-4 sm:px-5 py-3 border-b-2 border-border bg-background/95 backdrop-blur z-10">
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-10 w-10 shrink-0 rounded-md border-2 border-black bg-yellow-300 flex items-center justify-center">
+                <Users className="h-5 w-5 text-black stroke-2" />
+              </div>
+              <div className="flex flex-col min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">
+                    My Patients
+                  </h1>
+                  <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">Directory</Badge>
+                </div>
+                <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
+                  {isLinkMode ? "Select a patient to link to this clinical session" : "View your patients, and their details"}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              {!isLinkMode && (
+                <Button className="bg-[#3e2b2b] hover:bg-[#2e1b1b] text-white">
+                  <Plus className="mr-2 h-4 w-4" /> New patient
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 text-sm">
+            <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
+              <Users className="h-3.5 w-3.5" />
+              <span className="inline-block text-center tabular-nums">{totalPatients}</span>
+              <span>Total Patients</span>
+            </Badge>
+            <Badge className="gap-1.5 py-1 px-2.5 border border-green-400 bg-green-200 text-green-900 dark:border-green-700 dark:bg-green-900/35 dark:text-green-200 font-medium">
+              <CalendarIcon className="h-3.5 w-3.5" />
+              {upcomingCount} Upcoming
+            </Badge>
+            {isLinkMode && (
+              <Badge
+                variant="outline"
+                className="gap-1.5 py-1 px-2.5 border-2 border-blue-300 bg-blue-100/80 text-blue-900 font-medium"
+              >
+                <Link2 className="h-3.5 w-3.5" />
+                Link Mode
+              </Badge>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <div className="space-y-4 px-4 sm:px-5 pt-6 pb-8">
+        <div className="flex items-center justify-between">
+          <div className="flex flex-1 items-center space-x-2">
+            <Input
+              placeholder="Search for a task or patient"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              className="h-10 w-[150px] lg:w-[320px] bg-white"
+            />
+            
+            {/* Status Filter */}
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-10 border-dashed bg-white mx-1 my-1">
+                        <Check className="mr-2 h-4 w-4" />
+                        Status
+                        {statusFilter && (
+                            <>
+                                <DropdownMenuSeparator className="mx-2 h-4" />
+                                <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                                    {statusFilter}
+                                </Badge>
+                            </>
+                        )}
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-[150px]">
+                    <DropdownMenuLabel>Filter by Status</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setStatusFilter("Upcoming")}>
+                        <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", statusFilter === "Upcoming" ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
+                            <Check className={cn("h-4 w-4")} />
+                        </div>
+                        <Badge className="gap-1.5 py-1 px-2.5 border border-green-400 bg-green-200 text-green-900 dark:border-green-700 dark:bg-green-900/35 dark:text-green-200 font-medium hover:bg-green-300">Upcoming</Badge>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setStatusFilter("Past")}>
+                        <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", statusFilter === "Past" ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
+                             <Check className={cn("h-4 w-4")} />
+                        </div>
+                         <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 hover:bg-yellow-200 border-yellow-200">Past</Badge>
+                    </DropdownMenuItem>
+                    {statusFilter && (
+                        <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem 
+                                onClick={() => setStatusFilter(null)}
+                                className="justify-center text-center"
+                            >
+                                Clear filters
+                            </DropdownMenuItem>
+                        </>
+                    )}
+                </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Gender Filter */}
+             <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-10 border-dashed bg-white mx-1">
+                        <ListTodo className="mr-2 h-4 w-4" />
+                        Gender
+                        {genderFilter && (
+                            <>
+                                <DropdownMenuSeparator className="mx-2 h-4" />
+                                <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                                    {genderFilter}
+                                </Badge>
+                            </>
+                        )}
+                    </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-[150px]">
+                    <DropdownMenuLabel>Filter by Gender</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setGenderFilter("Male")}>
+                        <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", genderFilter === "Male" ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
+                             <Check className={cn("h-4 w-4")} />
+                        </div>
+                        <User className="mr-2 h-4 w-4 text-blue-500" />
+                        <span>Male</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setGenderFilter("Female")}>
+                         <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", genderFilter === "Female" ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
+                             <Check className={cn("h-4 w-4")} />
+                        </div>
+                        <User className="mr-2 h-4 w-4 text-pink-500" />
+                        <span>Female</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setGenderFilter("Other")}>
+                         <div className={cn("mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary", genderFilter === "Other" ? "bg-primary text-primary-foreground" : "opacity-50 [&_svg]:invisible")}>
+                             <Check className={cn("h-4 w-4")} />
+                        </div>
+                        <UserMinus className="mr-2 h-4 w-4 text-slate-500" />
+                        <span>Other</span>
+                    </DropdownMenuItem>
+                     {genderFilter && (
+                        <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem 
+                                onClick={() => setGenderFilter(null)}
+                                className="justify-center text-center"
+                            >
+                                Clear filters
+                            </DropdownMenuItem>
+                        </>
+                    )}
+                </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Last Visit Date Filter */}
+             <Popover>
+                <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-10 border-dashed bg-white mx-1">
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        Last Visit
+                         {dateFilter && (
+                            <>
+                                <DropdownMenuSeparator className="mx-2 h-4" />
+                                <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                                    {format(dateFilter, "MMM d")}
+                                </Badge>
+                            </>
+                        )}
+                    </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                        mode="single"
+                        selected={dateFilter}
+                        onSelect={setDateFilter}
+                        initialFocus
+                    />
+                </PopoverContent>
+            </Popover>
+            
+            {hasFilters && (
+              <Button
+                variant="ghost"
+                onClick={clearFilters}
+                className="h-10 px-2 lg:px-3"
+              >
+                Reset filters
+                <DropdownMenuSeparator className="mx-2 h-4 w-[1px] bg-slate-200 rotate-12" />
+                <ListTodo className="ml-1 h-3 w-3 rotate-90" />
+              </Button>
+            )}
+          </div>
+        </div>
+        
+        <div className="rounded-md border bg-white overflow-hidden">
+          <Table>
+            <TableHeader className="bg-[#FFFBF5]">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-[50px]">
+                </TableHead>
+                <TableHead className="w-[300px] text-zinc-800 font-semibold">
+                   <Button variant="ghost" className="-ml-4 h-8 font-semibold hover:bg-transparent hover:text-zinc-900">
+                      Patient
+                      <ArrowUpDown className="ml-2 h-4 w-4" />
+                   </Button>
+                </TableHead>
+                 <TableHead className="text-zinc-800 font-semibold">Gender</TableHead>
+                 <TableHead className="text-zinc-800 font-semibold">Status</TableHead>
+                 <TableHead className="text-zinc-800 font-semibold">Last Visit</TableHead>
+                <TableHead className="w-[170px] px-4 text-zinc-800 font-semibold">
+                  {isLinkMode ? (
+                    <div className="flex justify-end">
+                      <span className="inline-flex w-[84px] justify-center">Action</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-end">
+                      <span className="inline-flex w-8 justify-center">Action</span>
+                    </div>
+                  )}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredPatients.length > 0 ? (
+                filteredPatients.map((patient) => (
+                  <TableRow
+                    key={patient.id}
+                    className={isLinkMode ? "" : "cursor-pointer"}
+                    onClick={() => handlePatientClick(patient.id)}
+                  >
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Avatar className="h-8 w-8">
+                            <AvatarFallback>{patient.initials}</AvatarFallback>
+                        </Avatar>
+                    </TableCell>
+                    <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                            <span className="truncate font-bold">{patient.name}</span>
+                        </div>
+                    </TableCell>
+                     <TableCell>{patient.gender || "-"}</TableCell>
+                    <TableCell>
+                        {patient.status === 'Upcoming' ? (
+                            <Badge className="gap-1.5 py-1 px-2.5 border border-green-400 bg-green-200 text-green-900 dark:border-green-700 dark:bg-green-900/35 dark:text-green-200 font-medium hover:bg-green-300">
+                                {patient.status}
+                            </Badge>
+                        ) : (
+                            <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 hover:bg-yellow-200 border-yellow-200">
+                                {patient.status}
+                            </Badge>
+                        )}
+                    </TableCell>
+                    <TableCell>
+                        {formatDate(patient.lastVisit)}
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()} className="w-[170px] px-4">
+                      <div className="flex justify-end">
+                        {isLinkMode ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-8 w-[84px] justify-center rounded-md border border-black bg-black px-3 text-white font-semibold hover:bg-stone-800 hover:text-white"
+                            disabled={Boolean(linkingPatientId)}
+                            onClick={() => {
+                              void handleLinkPatient(patient.id);
+                            }}
+                          >
+                            {linkingPatientId === patient.id ? (
+                              <>
+                                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                                Linking
+                              </>
+                            ) : (
+                              <>
+                                <Link2 className="mr-1 h-3.5 w-3.5" />
+                                Link
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" className="h-8 w-8 p-0">
+                                      <span className="sr-only">Open menu</span>
+                                      <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                  <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                  <DropdownMenuItem onClick={() => handlePatientClick(patient.id)}>View Details</DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem>Edit Patient</DropdownMenuItem>
+                                  <DropdownMenuItem className="text-destructive">Delete Patient</DropdownMenuItem>
+                              </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={6}
+                    className="h-24 text-center"
+                  >
+                    No results.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+    </div>
+  );
+}

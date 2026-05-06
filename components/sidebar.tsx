@@ -1,0 +1,423 @@
+"use client";
+
+import React from "react";
+import {
+  Calendar,
+  ClipboardList,
+  FileText,
+  FlaskConical,
+  LayoutDashboard,
+  MessageSquare,
+  Pill,
+  StickyNote,
+  Users,
+  AudioLines,
+  Settings,
+  HelpCircle,
+  Plus,
+  ChevronsUpDown,
+  LogOut,
+  BadgeCheck,
+  ChevronRight,
+} from "lucide-react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useUser, useClerk } from "@clerk/nextjs";
+import { createNewAppointmentSession } from "@/app/actions/doctorActions";
+
+import {
+  Sidebar as ShadcnSidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+  SidebarTrigger,
+  SidebarSeparator,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { ClinicalSidebar } from "@/components/clinical-sidebar";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@/components/ui/avatar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
+interface NavItem {
+  label: string;
+  href: string;
+  icon: React.ElementType;
+}
+
+const patientMenuItems: NavItem[] = [
+  { label: "Dashboard", href: "/patient/dashboard", icon: LayoutDashboard },
+  { label: "My Notes", href: "/patient/notes", icon: StickyNote },
+];
+
+const patientAppointmentItems: NavItem[] = [
+  { label: "Doctors", href: "/patient/doctors", icon: Users },
+  { label: "Visit Summaries", href: "/patient/visit-summaries", icon: ClipboardList },
+  { label: "Transcripts", href: "/patient/transcripts", icon: MessageSquare },
+];
+
+const patientSpaceItems: NavItem[] = [
+  { label: "Labs & Imaging", href: "/patient/labs", icon: FlaskConical },
+  { label: "Medications", href: "/patient/medications", icon: Pill },
+  { label: "Reports", href: "/patient/reports", icon: FileText },
+];
+
+// Doctor Group 1: Menu
+const doctorMenuItems: NavItem[] = [
+  { label: "Dashboard", href: "/doctor/dashboard", icon: LayoutDashboard },
+  { label: "Clinical Session", href: "/doctor/clinical-session", icon: AudioLines },
+];
+
+// Doctor Group 2: My Space
+const doctorSpaceItems: NavItem[] = [
+  { label: "My Patients", href: "/doctor/patients", icon: Users },
+  { label: "Schedule", href: "/doctor/schedule", icon: Calendar },
+  { label: "Note Studio", href: "/doctor/note-studio/gallery", icon: ClipboardList },
+  { label: "Post-Visit Editor", href: "/doctor/post-visit", icon: FileText },
+];
+
+const doctorBottomItems: NavItem[] = [
+  { label: "Settings", href: "/doctor/settings", icon: Settings },
+];
+
+const patientBottomItems: NavItem[] = [
+  { label: "Settings", href: "/patient/settings", icon: Settings },
+];
+
+interface SidebarProps {
+  role: "doctor" | "patient";
+}
+
+const CLINICAL_CHAT_PANE_EVENT = "clinical:chat-pane-request";
+const CLINICAL_SUB_SIDEBAR_EVENT = "clinical:sub-sidebar-request";
+
+export function Sidebar({ role }: SidebarProps) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { user } = useUser();
+  const { signOut, openUserProfile } = useClerk();
+  const { isMobile } = useSidebar();
+  const [mounted, setMounted] = React.useState(false);
+  const [isClinicalSidebarOpen, setIsClinicalSidebarOpen] = React.useState(false);
+  const [isCreatingAppointment, setIsCreatingAppointment] = React.useState(false);
+  const isDoctor = role === "doctor";
+  const isPatient = role === "patient";
+  const bottomItems = role === "doctor" ? doctorBottomItems : patientBottomItems;
+
+  const handleNewAppointment = async () => {
+    if (role !== "doctor" || isCreatingAppointment) return;
+
+    setIsCreatingAppointment(true);
+    try {
+      const result = await createNewAppointmentSession();
+      if (result.success && result.appointmentId) {
+        router.push(`/doctor/clinical-session/${result.appointmentId}`);
+        return;
+      }
+
+      console.error(result.error || "Failed to create appointment");
+    } catch (error) {
+      console.error("Failed to create new appointment", error);
+    } finally {
+      setIsCreatingAppointment(false);
+    }
+  };
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Close clinical sidebar when navigating away from clinical session
+  React.useEffect(() => {
+    if (pathname !== "/doctor/clinical-session") {
+      setIsClinicalSidebarOpen(false);
+    }
+  }, [pathname]);
+
+  React.useEffect(() => {
+    const onChatPaneRequest = (event: Event) => {
+      const customEvent = event as CustomEvent<{ open?: boolean }>;
+      if (customEvent.detail?.open) {
+        setIsClinicalSidebarOpen(false);
+      }
+    };
+
+    window.addEventListener(CLINICAL_CHAT_PANE_EVENT, onChatPaneRequest as EventListener);
+    return () => {
+      window.removeEventListener(CLINICAL_CHAT_PANE_EVENT, onChatPaneRequest as EventListener);
+    };
+  }, []);
+
+  // Define groups based on role
+  const navGroups = role === "doctor"
+    ? [
+      { label: "Menu", items: doctorMenuItems },
+      { label: "My Space", items: doctorSpaceItems }
+    ]
+    : [
+      { label: "Menu", items: patientMenuItems },
+      { label: "Appointments", items: patientAppointmentItems },
+      { label: "My Space", items: patientSpaceItems }
+    ];
+
+  return (
+    <>
+      <ShadcnSidebar collapsible="icon" className="border-r bg-sidebar">
+        <SidebarHeader className="h-fit gap-0 p-2">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              {/* Header Box */}
+              <div className="flex w-full items-center justify-between rounded-lg bg-yellow-300 p-3 transition-all duration-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-2">
+                <span className="whitespace-nowrap text-lg font-black tracking-tight text-black group-data-[collapsible=icon]:hidden w-full text-center">
+                  Shifa Scribe
+                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <SidebarTrigger className="text-black hover:bg-black/10 shrink-0" />
+                  </TooltipTrigger>
+                  <TooltipContent side="right">Toggle Sidebar</TooltipContent>
+                </Tooltip>
+              </div>
+            </SidebarMenuItem>
+          </SidebarMenu>
+
+          <SidebarMenu className="mt-3">
+            {/* Button Container */}
+            <SidebarMenuItem className="px-1-4">
+              <Button
+                className="w-full justify-center gap-2 bg-black text-white hover:bg-zinc-800 hover:text-white group-data-[collapsible=icon]:hidden shadow-md h-10 font-semibold"
+                onClick={isDoctor ? handleNewAppointment : undefined}
+                disabled={isDoctor && isCreatingAppointment}
+                asChild={isPatient}
+              >
+                {isPatient ? (
+                  <Link href="/patient/doctors">
+                    <Plus className="h-4 w-4" />
+                    <span>Schedule Appointment</span>
+                  </Link>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4" />
+                    <span>New Session</span>
+                  </>
+                )}
+              </Button>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    className="h-9 w-9 p-0 hidden group-data-[collapsible=icon]:flex mx-auto bg-black text-white hover:bg-zinc-800 hover:text-white rounded-lg"
+                    size="icon"
+                    onClick={isDoctor ? handleNewAppointment : () => router.push("/patient/doctors")}
+                    disabled={isDoctor && isCreatingAppointment}
+                  >
+                    <Plus className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{isDoctor ? "New Session" : "Schedule Appointment"}</TooltipContent>
+              </Tooltip>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
+
+        <SidebarContent>
+          {navGroups.map((group) => (
+            <SidebarGroup key={group.label}>
+              <SidebarGroupLabel className="uppercase tracking-wider text-xs font-semibold text-muted-foreground/70">
+                {group.label}
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {group.items.map((item) => {
+                    const isClinicalSession = item.label === "Clinical Session";
+                    // Active state is driven by path, except for Clinical Session which is just a trigger
+                    const isActive = isClinicalSession ? false : pathname === item.href;
+
+                    return (
+                      <SidebarMenuItem key={item.label}>
+                        <SidebarMenuButton
+                          asChild={!isClinicalSession}
+                          isActive={isActive}
+                          tooltip={item.label}
+                          className={`
+                          transition-all duration-200 
+                          ${isActive ? "font-medium bg-stone-100 text-primary border-l-4 border-primary rounded-r-lg rounded-l-none pl-3" : "text-muted-foreground pl-4"}
+                          ${isClinicalSession ? "cursor-pointer hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" : ""}
+                        `}
+                          onClick={(e) => {
+                            if (isClinicalSession) {
+                              e.preventDefault();
+                              const nextOpen = !isClinicalSidebarOpen;
+                              setIsClinicalSidebarOpen(nextOpen);
+                              if (typeof window !== "undefined") {
+                                window.dispatchEvent(
+                                  new CustomEvent(CLINICAL_SUB_SIDEBAR_EVENT, {
+                                    detail: { open: nextOpen },
+                                  }),
+                                );
+                              }
+                            } else {
+                              setIsClinicalSidebarOpen(false);
+                            }
+                          }}
+                        >
+                          {isClinicalSession ? (
+                            <>
+                              <item.icon className={isActive ? "text-primary" : "text-muted-foreground"} />
+                              <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">{item.label}</span>
+                              <ChevronRight
+                                className={`ml-auto h-4 w-4 transition-transform duration-200 group-data-[collapsible=icon]:hidden ${isClinicalSidebarOpen ? "rotate-180" : ""}`}
+                              />
+                            </>
+                          ) : (
+                            <Link href={item.href} className="flex w-full items-center gap-2">
+                              <item.icon className={isActive ? "text-primary" : "text-muted-foreground"} />
+                              <span className="truncate">{item.label}</span>
+                              {item.label === "Note Studio" ? (
+                                <span className="ml-auto rounded-full bg-zinc-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-700 group-data-[collapsible=icon]:hidden">
+                                  Beta
+                                </span>
+                              ) : null}
+                            </Link>
+                          )}
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          ))}
+        </SidebarContent>
+
+        <SidebarSeparator className="mx-0 bg-sidebar-border/45" />
+
+        <SidebarFooter className="p-2">
+          <SidebarMenu>
+            {bottomItems.map((item) => (
+              <SidebarMenuItem key={item.label}>
+                <SidebarMenuButton asChild tooltip={item.label} className="pl-4 text-muted-foreground">
+                  <Link href={item.href}>
+                    <item.icon />
+                    <span>{item.label}</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+            <SidebarMenuItem>
+              <SidebarMenuButton tooltip="Help" className="pl-4 text-muted-foreground">
+                <HelpCircle />
+                <span>Help</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              {mounted ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <SidebarMenuButton
+                      size="lg"
+                      className="pl-4 text-muted-foreground rounded-xl transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                    >
+                      <Avatar className="h-8 w-8 rounded-lg border border-stone-200">
+                        <AvatarImage src={user?.imageUrl} alt={user?.fullName || ""} />
+                        <AvatarFallback className="rounded-lg">CN</AvatarFallback>
+                      </Avatar>
+                      <div className="grid flex-1 text-left text-sm leading-tight">
+                        <span className="truncate font-semibold text-primary">{user?.fullName}</span>
+                        <span className="truncate text-xs text-muted-foreground">{user?.primaryEmailAddress?.emailAddress}</span>
+                      </div>
+                      <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
+                    </SidebarMenuButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+                    side={isMobile ? "bottom" : "right"}
+                    align="end"
+                    sideOffset={4}
+                  >
+                    <DropdownMenuLabel className="p-0 font-normal">
+                      <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
+                        <Avatar className="h-8 w-8 rounded-lg">
+                          <AvatarImage src={user?.imageUrl} alt={user?.fullName || ""} />
+                          <AvatarFallback className="rounded-lg">CN</AvatarFallback>
+                        </Avatar>
+                        <div className="grid flex-1 text-left text-sm leading-tight">
+                          <span className="truncate font-semibold">{user?.fullName}</span>
+                          <span className="truncate text-xs">{user?.primaryEmailAddress?.emailAddress}</span>
+                        </div>
+                      </div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem onClick={() => openUserProfile()}>
+                        <BadgeCheck className="mr-2 h-4 w-4" />
+                        Account
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => signOut()}>
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Log out
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <SidebarMenuButton
+                  size="lg"
+                  className="pl-4 text-muted-foreground rounded-xl transition-colors"
+                >
+                  <Avatar className="h-8 w-8 rounded-lg border border-stone-200">
+                    <AvatarImage src={user?.imageUrl} alt={user?.fullName || ""} />
+                    <AvatarFallback className="rounded-lg">CN</AvatarFallback>
+                  </Avatar>
+                  <div className="grid flex-1 text-left text-sm leading-tight">
+                    <span className="truncate font-semibold text-primary">{user?.fullName}</span>
+                    <span className="truncate text-xs text-muted-foreground">{user?.primaryEmailAddress?.emailAddress}</span>
+                  </div>
+                  <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
+                </SidebarMenuButton>
+              )}
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+        <SidebarRail />
+      </ShadcnSidebar>
+      {mounted && (
+        <div
+          className={`sticky top-0 self-start h-svh overflow-hidden transition-all duration-300 ease-out ${isClinicalSidebarOpen
+              ? "w-[17rem] translate-x-0 opacity-100"
+              : "w-0 translate-x-2 opacity-0 pointer-events-none"
+            }`}
+          aria-hidden={!isClinicalSidebarOpen}
+        >
+          <ClinicalSidebar />
+        </div>
+      )}
+    </>
+  );
+}

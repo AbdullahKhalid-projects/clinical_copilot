@@ -1,0 +1,2909 @@
+"use client";
+
+import * as React from "react";
+import { format, isValid } from "date-fns";
+import { useRouter, useSearchParams } from "next/navigation";
+import { PDFDownloadLink, pdf } from "@react-pdf/renderer";
+import {
+    AudioLines,
+    ChevronDown,
+    ChevronLeft,
+    ChevronRight,
+    Mic,
+    PenLine,
+    FileCode2,
+    Download,
+    Save,
+    Trash,
+    History,
+    Mic2,
+    Calendar,
+    Pause,
+    StopCircle,
+    Play,
+    FileText,
+    Stethoscope,
+    MessageSquare,
+    Loader2,
+    Clock3,
+    CheckCircle2,
+    RotateCcw,
+    Link2,
+    Upload,
+    SlidersHorizontal,
+    Info
+} from "lucide-react";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { useUploadThing } from "@/lib/uploadthing";
+import { useToast } from "@/hooks/use-toast";
+import { useClinicalWebSocket, type TranscriptSegment } from "@/hooks/use-clinical-websocket";
+import { SessionTabs, type ClinicalSessionTab } from "./components/session-tabs";
+import { LiveTranscriptPanel } from "./components/live-transcript-panel";
+import { SessionRecordingActions } from "./components/session-recording-actions";
+import { Thread } from "@/components/thread";
+import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
+import { confirmAndSaveAppointmentTranscription } from "../transcription-workflow-actions";
+import {
+    generateAppointmentNoteFromTemplate,
+    getActiveNoteTemplatesForSession,
+    saveAppointmentTemplateNoteDraft,
+} from "../note-workflow-actions";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { NoteDocument } from "@/lib/note-document-pdf";
+import type { SoapTemplate } from "@/app/doctor/templates/types";
+import { renderNotePreviewFromObject } from "@/app/doctor/templates/template-engine";
+
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuRadioGroup,
+    DropdownMenuRadioItem,
+    DropdownMenuTrigger,
+    DropdownMenuLabel,
+    DropdownMenuSeparator
+} from "@/components/ui/dropdown-menu";
+import {
+    Dialog,
+    DialogContent,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+} from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+    getClinicalSessionData,
+    getAppointmentPatientMetricCatalog,
+    getAppointmentFinalizeChecklist,
+    getDoctorPatientsForLinking,
+    finalizeAppointmentSession,
+    linkPatientToAppointment,
+    deleteAppointmentSession,
+    saveSessionFinalArtifacts,
+    type FinalizeChecklistResult,
+    type LinkablePatient,
+} from "../actions";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+// Simple Canvas Visualizer Component
+// (Removed as we are using the one in AudioRecorderWithVisualizer component)
+
+interface ClinicalSessionClientProps {
+    appointment: any; // We'll type this properly later or infer from usage
+}
+
+const CLINICAL_CHAT_PANE_EVENT = "clinical:chat-pane-request";
+const CLINICAL_SUB_SIDEBAR_EVENT = "clinical:sub-sidebar-request";
+const CHAT_PANEL_TRANSITION_MS = 300;
+const CHAT_PANEL_CONTENT_FADE_DELAY_MS = 80;
+
+type MetricChatRequest = {
+    id: number;
+    metric: string;
+};
+
+function extractNoteTextFromPayload(rawSoapNote: any): string {
+    if (!rawSoapNote || typeof rawSoapNote !== "object") {
+        return "";
+    }
+
+    if (typeof rawSoapNote.noteText === "string" && rawSoapNote.noteText.trim()) {
+        return rawSoapNote.noteText;
+    }
+
+    if (
+        typeof rawSoapNote.subjective === "string" ||
+        typeof rawSoapNote.objective === "string" ||
+        typeof rawSoapNote.assessment === "string" ||
+        typeof rawSoapNote.plan === "string"
+    ) {
+        return [
+            `Subjective:\n${String(rawSoapNote.subjective || "")}`,
+            `Objective:\n${String(rawSoapNote.objective || "")}`,
+            `Assessment:\n${String(rawSoapNote.assessment || "")}`,
+            `Plan:\n${String(rawSoapNote.plan || "")}`,
+        ].join("\n\n").trim();
+    }
+
+    return "";
+}
+
+function extractNoteDataFromPayload(rawSoapNote: any): Record<string, unknown> {
+    if (!rawSoapNote || typeof rawSoapNote !== "object") {
+        return {};
+    }
+
+    if (rawSoapNote.noteData && typeof rawSoapNote.noteData === "object" && !Array.isArray(rawSoapNote.noteData)) {
+        return rawSoapNote.noteData as Record<string, unknown>;
+    }
+
+    return {};
+}
+
+function extractNoteMetadataFromPayload(rawSoapNote: any): Record<string, unknown> {
+    if (!rawSoapNote || typeof rawSoapNote !== "object") {
+        return {};
+    }
+
+    if (rawSoapNote.noteMetadata && typeof rawSoapNote.noteMetadata === "object" && !Array.isArray(rawSoapNote.noteMetadata)) {
+        return rawSoapNote.noteMetadata as Record<string, unknown>;
+    }
+
+    return {};
+}
+
+function formatDateForNoteMetadata(value: unknown): string {
+    if (!value) {
+        return "";
+    }
+
+    const parsed = value instanceof Date ? value : new Date(String(value));
+    if (!isValid(parsed)) {
+        return "";
+    }
+
+    return parsed.toISOString().slice(0, 10);
+}
+
+function buildAppointmentPatientMetadata(rawAppointment: any): Record<string, unknown> {
+    const patientName = String(rawAppointment?.patient?.user?.name || "").trim();
+    const patientDateOfBirth = formatDateForNoteMetadata(rawAppointment?.patient?.dateOfBirth);
+    const visitDate = formatDateForNoteMetadata(rawAppointment?.date);
+    const rawPatientId = String(rawAppointment?.patient?.id || "").trim();
+    const shortPatientId = rawPatientId ? rawPatientId.slice(-4) : "";
+
+    return {
+        patient_name: patientName,
+        patient_date_of_birth: patientDateOfBirth,
+        date_of_birth: patientDateOfBirth,
+        dob: patientDateOfBirth,
+        patient_id: shortPatientId,
+        visit_date: visitDate,
+    };
+}
+
+function mergeMetadataWithLiveAppointment(
+    persistedMetadata: Record<string, unknown>,
+    liveMetadata: Record<string, unknown>,
+): Record<string, unknown> {
+    const merged = { ...persistedMetadata };
+
+    Object.entries(liveMetadata).forEach(([key, value]) => {
+        if (typeof value === "string" && value.trim().length > 0) {
+            merged[key] = value;
+            return;
+        }
+
+        if (!Object.prototype.hasOwnProperty.call(merged, key)) {
+            merged[key] = value;
+        }
+    });
+
+    return merged;
+}
+
+function buildDefaultNoteData(template: SoapTemplate | null): Record<string, unknown> {
+    if (!template) {
+        return {};
+    }
+
+    return template.bodySchema.fields.reduce<Record<string, unknown>>((acc, field) => {
+        if (field.type === "number") {
+            acc[field.key] = 0;
+        } else if (field.type === "boolean") {
+            acc[field.key] = false;
+        } else {
+            acc[field.key] = "";
+        }
+        return acc;
+    }, {});
+}
+
+function hasNonEmptyNoteData(noteData: Record<string, unknown>): boolean {
+    return Object.values(noteData).some((value) => {
+        if (typeof value === "string") {
+            return value.trim().length > 0;
+        }
+
+        if (typeof value === "number") {
+            return Number.isFinite(value) && value !== 0;
+        }
+
+        if (typeof value === "boolean") {
+            return value === true;
+        }
+
+        return false;
+    });
+}
+
+export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProps) {
+    const rootContainerRef = React.useRef<HTMLDivElement | null>(null);
+    const tabsRowRef = React.useRef<HTMLDivElement | null>(null);
+    const [pullTabTop, setPullTabTop] = React.useState<number | null>(null);
+    const [currentAppointment, setCurrentAppointment] = React.useState(appointment);
+    const router = useRouter();
+    const searchParams = useSearchParams();
+
+    React.useEffect(() => {
+        setCurrentAppointment(appointment);
+    }, [appointment]);
+
+    // Mock data for UI placeholders
+    const patientName = currentAppointment.patient?.user?.name || "Link Patient";
+    const parsedAppointmentDate = currentAppointment?.date ? new Date(currentAppointment.date) : null;
+    const appointmentDate = parsedAppointmentDate && isValid(parsedAppointmentDate) ? parsedAppointmentDate : null;
+    const patientInitials = patientName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+    const patientImage = currentAppointment.patientImageUrl;
+    const reason = currentAppointment.reason || "General Consultation";
+    const hasLinkedPatient = Boolean(currentAppointment.patient?.id);
+    const statusLabelMap: Record<string, string> = {
+        UNLINKED: "Unlinked",
+        PENDING: "Pending",
+        CONFIRMED: "Confirmed",
+        IN_PROGRESS: "In Progress",
+        COMPLETED: "Completed",
+        CANCELLED: "Cancelled",
+    };
+    const statusLabel = statusLabelMap[currentAppointment.status] || currentAppointment.status || "Unknown";
+    const statusBadgeClassMap: Record<string, string> = {
+        UNLINKED: "border-amber-300 bg-amber-100/70 text-amber-900",
+        PENDING: "border-zinc-300 bg-zinc-100/80 text-zinc-800",
+        CONFIRMED: "border-sky-300 bg-sky-100/70 text-sky-900",
+        IN_PROGRESS: "border-blue-300 bg-blue-100/70 text-blue-900",
+        COMPLETED: "border-emerald-300 bg-emerald-100/70 text-emerald-900",
+        CANCELLED: "border-red-300 bg-red-100/70 text-red-900",
+    };
+    const statusBadgeClass = statusBadgeClassMap[currentAppointment.status] || "border-border bg-muted/70 text-foreground";
+    const pythonBackendUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const [selectedLanguage, setSelectedLanguage] = React.useState<"en" | "ur">("en");
+    const [hasConfirmedLanguage, setHasConfirmedLanguage] = React.useState(false);
+
+    const {
+        connect,
+        disconnect,
+        connected,
+        sessionId,
+        transcript,
+        draftTranscript,
+        facts,
+        alerts,
+        speakerRoles,
+        sendAudioChunk,
+        stopSession,
+        sessionStopped,
+        waitForServerReady,
+        waitForFidelityResult,
+    } = useClinicalWebSocket({
+        backendUrl: pythonBackendUrl,
+        language: selectedLanguage,
+        doctorVoiceEmbeddingData: currentAppointment?.doctor?.voiceEmbedding?.embeddingData ?? null,
+    });
+
+    // State for recording and devices
+    const [isUploading, setIsUploading] = React.useState(false);
+    const [uploadProgress, setUploadProgress] = React.useState(0);
+    const [isProcessing, setIsProcessing] = React.useState(false);
+    const [isFinalizationDialogOpen, setIsFinalizationDialogOpen] = React.useState(false);
+    const [finalizationStep, setFinalizationStep] = React.useState<1 | 2 | 3 | 4>(1);
+    const [finalSpeakerDraftMapping, setFinalSpeakerDraftMapping] = React.useState<Record<string, string>>({});
+    const [fidelityScore, setFidelityScore] = React.useState<number | null>(null);
+    const [fidelityReasoning, setFidelityReasoning] = React.useState<string | null>(null);
+    const [fidelitySource, setFidelitySource] = React.useState<string | null>(null);
+    const [isSavingToDatabase, setIsSavingToDatabase] = React.useState(false);
+    const [tempRecordingUrl, setTempRecordingUrl] = React.useState<string | null>(null);
+    const [microphoneDevices, setMicrophoneDevices] = React.useState<MediaDeviceInfo[]>([]);
+    const [selectedMicrophoneId, setSelectedMicrophoneId] = React.useState<string>("default");
+    const [isLoadingMicrophones, setIsLoadingMicrophones] = React.useState(false);
+    const [recordingUrl, setRecordingUrl] = React.useState<string | null>(currentAppointment.recordingUrl ?? null);
+    const [isRecordingInfoOpen, setIsRecordingInfoOpen] = React.useState(false);
+    const [activeMainTab, setActiveMainTab] = React.useState<ClinicalSessionTab>("context");
+    const [isLanguageDialogOpen, setIsLanguageDialogOpen] = React.useState(false);
+    const [pendingStartAfterLanguageSelection, setPendingStartAfterLanguageSelection] = React.useState(false);
+    const [startSignal, setStartSignal] = React.useState(0);
+    const [isChatPanelOpen, setIsChatPanelOpen] = React.useState(false);
+    const [isChatPanelContentVisible, setIsChatPanelContentVisible] = React.useState(false);
+    const [isLiveConnecting, setIsLiveConnecting] = React.useState(false);
+    const [isServerWarming, setIsServerWarming] = React.useState(false);
+    const [speakerMapping, setSpeakerMapping] = React.useState<Record<string, string>>({});
+    const [isSpeakerReviewOpen, setIsSpeakerReviewOpen] = React.useState(false);
+    const [speakerDraftMapping, setSpeakerDraftMapping] = React.useState<Record<string, string>>({});
+    const [isGeneratingSoap, setIsGeneratingSoap] = React.useState(false);
+    const [isRecorderPaused, setIsRecorderPaused] = React.useState(false);
+    const liveTranscriptionCancelledRef = React.useRef(false);
+    const [noteTemplates, setNoteTemplates] = React.useState<Array<{ id: string; name: string; description: string; template: SoapTemplate }>>([]);
+    const [selectedTemplateId, setSelectedTemplateId] = React.useState("");
+    const [isLoadingNoteTemplates, setIsLoadingNoteTemplates] = React.useState(false);
+    const [hasAttemptedNoteTemplateLoad, setHasAttemptedNoteTemplateLoad] = React.useState(false);
+    const [isGeneratingNote, setIsGeneratingNote] = React.useState(false);
+    const [isSavingNote, setIsSavingNote] = React.useState(false);
+    const [activeNotePanel, setActiveNotePanel] = React.useState<"editor" | "preview">("editor");
+    const [editableNoteData, setEditableNoteData] = React.useState<Record<string, unknown>>(() => extractNoteDataFromPayload(appointment?.soapNote));
+    const [isNoteDirty, setIsNoteDirty] = React.useState(false);
+    const [generatedNoteText, setGeneratedNoteText] = React.useState<string>(() => extractNoteTextFromPayload(appointment?.soapNote));
+    const [hasGeneratedNoteCheckpoint, setHasGeneratedNoteCheckpoint] = React.useState<boolean>(() => {
+        const initialNoteText = extractNoteTextFromPayload(appointment?.soapNote);
+        const initialNoteData = extractNoteDataFromPayload(appointment?.soapNote);
+        return initialNoteText.trim().length > 0 || hasNonEmptyNoteData(initialNoteData);
+    });
+    const uploadInputRef = React.useRef<HTMLInputElement | null>(null);
+    const [isLinkPatientDialogOpen, setIsLinkPatientDialogOpen] = React.useState(false);
+    const [isLoadingPatients, setIsLoadingPatients] = React.useState(false);
+    const [isLinkingPatient, setIsLinkingPatient] = React.useState(false);
+    const [isDeletingAppointment, setIsDeletingAppointment] = React.useState(false);
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = React.useState(false);
+    const [linkablePatients, setLinkablePatients] = React.useState<LinkablePatient[]>([]);
+    const [isFinalizeDialogOpen, setIsFinalizeDialogOpen] = React.useState(false);
+    const [isFinalizeChecklistLoading, setIsFinalizeChecklistLoading] = React.useState(false);
+    const [isFinalizingSession, setIsFinalizingSession] = React.useState(false);
+    const [finalizeChecklistResult, setFinalizeChecklistResult] = React.useState<FinalizeChecklistResult | null>(null);
+    const [patientMetricCatalog, setPatientMetricCatalog] = React.useState<string[]>([]);
+    const [isMetricCatalogLoading, setIsMetricCatalogLoading] = React.useState(false);
+    const [metricCatalogError, setMetricCatalogError] = React.useState<string | null>(null);
+    const [metricCatalogSearch, setMetricCatalogSearch] = React.useState("");
+    const [pendingMetricChatRequest, setPendingMetricChatRequest] = React.useState<MetricChatRequest | null>(null);
+    const metricChatRequestIdRef = React.useRef(0);
+    const hasAutoOpenedFinalizeRef = React.useRef(false);
+    const hasMountedPanelRef = React.useRef(false);
+    const panelRenderTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [isPanelRendering, setIsPanelRendering] = React.useState(false);
+    const transcriptEndRef = React.useRef<HTMLDivElement | null>(null);
+    const liveAudioContextRef = React.useRef<AudioContext | null>(null);
+    const liveProcessorRef = React.useRef<ScriptProcessorNode | null>(null);
+    const liveSourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
+    const isRecorderPausedRef = React.useRef(false);
+    const [retrievalMode, setRetrievalMode] = React.useState<"normal" | "semantic">("normal");
+
+    const handleToggleRetrievalMode = React.useCallback(() => {
+        setRetrievalMode((prev) => (prev === "normal" ? "semantic" : "normal"));
+    }, []);
+
+    const persistedTranscript = React.useMemo<TranscriptSegment[]>(() => {
+        if (!Array.isArray(currentAppointment?.transcript)) {
+            return [];
+        }
+
+        return currentAppointment.transcript
+            .filter((segment: any) => segment && typeof segment === "object")
+            .map((segment: any) => ({
+                text: String(segment.text || "").trim(),
+                speaker: String(segment.speaker || "Speaker 0"),
+                start: typeof segment.start === "number" ? segment.start : 0,
+                end: typeof segment.end === "number" ? segment.end : 0,
+                role: typeof segment.role === "string" ? segment.role : undefined,
+            }))
+            .filter((segment: TranscriptSegment) => segment.text.length > 0);
+    }, [currentAppointment?.transcript]);
+
+    const displayedTranscript = transcript.length > 0 ? transcript : persistedTranscript;
+    const mappedTranscript = React.useMemo<TranscriptSegment[]>(
+        () =>
+            displayedTranscript.map((segment) => ({
+                ...segment,
+                speaker: speakerMapping[segment.speaker] || segment.speaker,
+            })),
+        [displayedTranscript, speakerMapping],
+    );
+    const uniqueSpeakerIds = React.useMemo<string[]>(
+        () => Array.from(new Set(displayedTranscript.map((segment) => segment.speaker))).sort(),
+        [displayedTranscript],
+    );
+    const processedFacts = React.useMemo(() => {
+        const source = facts || {};
+        const result: Array<{ label: string; value: string; timestamp?: number }> = [];
+        const labelMap: Record<string, string> = {
+            patient_profile: "Patient profile",
+            chief_complaint: "Chief complaint",
+            history_of_present_illness: "History of present illness",
+            past_medical_history: "Past medical history",
+            current_illnesses: "Current illnesses",
+            mental_observations: "Mental observations",
+            physical_observations: "Physical observations",
+            medications: "Medications",
+            allergies: "Allergies",
+            vitals: "Vitals",
+            procedures: "Procedures",
+            family_history: "Family history",
+            social_and_lifestyle: "Social and lifestyle",
+            labs_and_imaging: "Labs and imaging",
+            plan: "Plan",
+        };
+
+        Object.entries(source).forEach(([key, value]) => {
+            if (!value) return;
+            const label = labelMap[key] || key.replace(/_/g, " ");
+
+            if (Array.isArray(value)) {
+                const cleaned = value
+                    .map((item) => {
+                        if (typeof item === "object" && item !== null && "text" in item) {
+                            return { text: String(item.text || "").trim(), timestamp: (item as any).timestamp };
+                        }
+                        return { text: String(item).trim(), timestamp: undefined };
+                    })
+                    .filter((item) => item.text.length > 0);
+                
+                if (cleaned.length > 0) {
+                    cleaned.forEach((item) => {
+                        result.push({ label, value: item.text, timestamp: item.timestamp });
+                    });
+                }
+                return;
+            }
+
+            if (typeof value === "object") {
+                const objectEntries = Object.entries(value as Record<string, unknown>)
+                    .map(([innerKey, innerValue]) => `${innerKey.replace(/_/g, " ")}: ${String(innerValue || "").trim()}`)
+                    .filter((entry) => !entry.endsWith(":"));
+                if (objectEntries.length > 0) {
+                    result.push({ label, value: objectEntries.join(", ") });
+                }
+                return;
+            }
+
+            const textValue = String(value).trim();
+            if (textValue.length > 0) {
+                result.push({ label, value: textValue });
+            }
+        });
+
+        return result;
+    }, [facts]);
+
+    const handleFactClick = React.useCallback((timestamp?: number) => {
+        if (timestamp === undefined || !transcriptEndRef.current) {
+            return;
+        }
+
+        // Find the segment closest to this timestamp
+        const closestSegment = displayedTranscript.reduce((closest, segment) => {
+            const segStart = typeof segment.start === "number" ? segment.start : 0;
+            const closestStart = typeof closest.start === "number" ? closest.start : 0;
+            const segDiff = Math.abs(segStart - timestamp);
+            const closestDiff = Math.abs(closestStart - timestamp);
+            return segDiff < closestDiff ? segment : closest;
+        }, displayedTranscript[0]);
+
+        if (closestSegment) {
+            // Scroll to the segment
+            const segmentKey = `${closestSegment.speaker}-${closestSegment.start}-${closestSegment.end}`;
+            const element = document.querySelector(`[data-segment-key="${segmentKey}"]`);
+            if (element) {
+                element.scrollIntoView({ behavior: "smooth", block: "center" });
+                
+                // Add grey highlight temporarily
+                const originalBg = element.style.backgroundColor;
+                element.style.backgroundColor = "rgba(128, 128, 128, 0.3)";
+                element.style.transition = "background-color 0.3s ease-out";
+                
+                setTimeout(() => {
+                    element.style.backgroundColor = originalBg;
+                }, 2000);
+            }
+        }
+    }, [displayedTranscript]);
+    const isTranscriptReadyForNote = displayedTranscript.length > 0;
+
+    const selectedTemplateOption = React.useMemo(
+        () => noteTemplates.find((template) => template.id === selectedTemplateId) || null,
+        [noteTemplates, selectedTemplateId],
+    );
+
+    const selectedTemplate = selectedTemplateOption?.template || null;
+    const persistedNoteMetadata = React.useMemo(
+        () => extractNoteMetadataFromPayload(currentAppointment?.soapNote),
+        [currentAppointment?.soapNote],
+    );
+    const livePatientMetadata = React.useMemo(
+        () => buildAppointmentPatientMetadata(currentAppointment),
+        [
+            currentAppointment?.date,
+            currentAppointment?.patient?.id,
+            currentAppointment?.patient?.dateOfBirth,
+            currentAppointment?.patient?.user?.name,
+        ],
+    );
+    const resolvedNoteMetadata = React.useMemo(
+        () => mergeMetadataWithLiveAppointment(persistedNoteMetadata, livePatientMetadata),
+        [persistedNoteMetadata, livePatientMetadata],
+    );
+    const noteDocumentData = React.useMemo(
+        () => ({ ...editableNoteData, ...resolvedNoteMetadata }),
+        [editableNoteData, resolvedNoteMetadata],
+    );
+
+    const { toast } = useToast();
+    const { startUpload } = useUploadThing("audioUploader");
+
+    const refreshMicrophoneDevices = React.useCallback(async (requestLabels = false, showError = false) => {
+        if (!(navigator.mediaDevices && navigator.mediaDevices.enumerateDevices)) {
+            setMicrophoneDevices([]);
+            return;
+        }
+
+        setIsLoadingMicrophones(true);
+        try {
+            if (requestLabels && navigator.mediaDevices.getUserMedia) {
+                try {
+                    const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    permissionStream.getTracks().forEach((track) => track.stop());
+                } catch (error) {
+                    console.error("Microphone permission was not granted for device labels", error);
+                }
+            }
+
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const inputs = devices.filter((device) => device.kind === "audioinput");
+            setMicrophoneDevices(inputs);
+            setSelectedMicrophoneId((current) => {
+                if (current === "default") {
+                    return current;
+                }
+
+                return inputs.some((device) => device.deviceId === current) ? current : "default";
+            });
+        } catch (error) {
+            console.error("Unable to enumerate microphone devices", error);
+            if (showError) {
+                toast({
+                    title: "Microphone devices unavailable",
+                    description: "Could not read audio input devices from this browser.",
+                    variant: "destructive",
+                });
+            }
+        } finally {
+            setIsLoadingMicrophones(false);
+        }
+    }, [toast]);
+
+    React.useEffect(() => {
+        void refreshMicrophoneDevices(false, false);
+
+        if (!(navigator.mediaDevices && navigator.mediaDevices.addEventListener)) {
+            return;
+        }
+
+        const handleDeviceChange = () => {
+            void refreshMicrophoneDevices(false, false);
+        };
+
+        navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
+        return () => {
+            navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
+        };
+    }, [refreshMicrophoneDevices]);
+
+    const selectableMicrophones = React.useMemo(
+        () => microphoneDevices.filter((device) => device.deviceId && device.deviceId !== "default"),
+        [microphoneDevices],
+    );
+
+    const selectedMicrophoneLabel = React.useMemo(() => {
+        if (selectedMicrophoneId === "default") {
+            return "System Default";
+        }
+
+        const matchedDevice = selectableMicrophones.find((device) => device.deviceId === selectedMicrophoneId);
+        if (!matchedDevice) {
+            return "Unknown microphone";
+        }
+
+        return matchedDevice.label?.trim() || "Unnamed microphone";
+    }, [selectableMicrophones, selectedMicrophoneId]);
+
+    const cleanupLiveTranscription = React.useCallback(() => {
+        if (liveProcessorRef.current) {
+            try {
+                liveProcessorRef.current.disconnect();
+            } catch (error) {
+                console.error("Failed to disconnect live processor", error);
+            }
+            liveProcessorRef.current = null;
+        }
+
+        if (liveSourceRef.current) {
+            try {
+                liveSourceRef.current.disconnect();
+            } catch (error) {
+                console.error("Failed to disconnect live source", error);
+            }
+            liveSourceRef.current = null;
+        }
+
+        if (liveAudioContextRef.current && liveAudioContextRef.current.state !== "closed") {
+            void liveAudioContextRef.current.close().catch((error) => {
+                console.error("Failed to close live audio context", error);
+            });
+        }
+
+        liveAudioContextRef.current = null;
+    }, []);
+
+    const startLiveTranscriptionWithStream = React.useCallback((stream: MediaStream) => {
+        liveTranscriptionCancelledRef.current = false;
+        isRecorderPausedRef.current = false;
+        setIsRecorderPaused(false);
+        setActiveMainTab("transcript");
+
+        void (async () => {
+            setIsLiveConnecting(true);
+
+            try {
+                const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+                const audioContext = new AudioContextCtor({ sampleRate: 16000 });
+                const source = audioContext.createMediaStreamSource(stream);
+                const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                processor.onaudioprocess = (event) => {
+                    if (liveTranscriptionCancelledRef.current || isRecorderPausedRef.current) {
+                        return;
+                    }
+
+                    const inputData = event.inputBuffer.getChannelData(0);
+                    const pcmData = new Int16Array(inputData.length);
+
+                    for (let index = 0; index < inputData.length; index += 1) {
+                        const sample = Math.max(-1, Math.min(1, inputData[index]));
+                        pcmData[index] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                    }
+
+                    sendAudioChunk(pcmData.buffer);
+                };
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                liveAudioContextRef.current = audioContext;
+                liveSourceRef.current = source;
+                liveProcessorRef.current = processor;
+
+                toast({
+                    title: "Live transcription connected",
+                    description: "Your recording is now streaming to the Python service.",
+                });
+            } catch (error) {
+                console.error("Failed to initialize live transcription", error);
+                toast({
+                    title: "Live transcription unavailable",
+                    description: "The audio will still be saved, but realtime transcript could not connect.",
+                    variant: "destructive",
+                });
+            } finally {
+                setIsLiveConnecting(false);
+            }
+        })();
+    }, [sendAudioChunk, toast]);
+
+    const handleRecordingStartRequest = React.useCallback(async () => {
+        // If language not confirmed yet, show dialog and prevent recording
+        if (!hasConfirmedLanguage) {
+            setPendingStartAfterLanguageSelection(true);
+            setIsLanguageDialogOpen(true);
+            return false;
+        }
+
+        // If pending (user selected language but waiting for warm-up), don't allow start yet
+        if (pendingStartAfterLanguageSelection) {
+            return false;
+        }
+
+        // Server is warm, language is confirmed - allow recording to start
+        return true;
+    }, [hasConfirmedLanguage, pendingStartAfterLanguageSelection]);
+
+    const handleRecordingStart = React.useCallback((stream: MediaStream) => {
+        startLiveTranscriptionWithStream(stream);
+    }, [startLiveTranscriptionWithStream]);
+
+    const handleRecordingDiscard = React.useCallback(() => {
+        liveTranscriptionCancelledRef.current = true;
+        isRecorderPausedRef.current = false;
+        setIsRecorderPaused(false);
+        cleanupLiveTranscription();
+        disconnect();
+        setActiveMainTab("context");
+        setIsLiveConnecting(false);
+    }, [cleanupLiveTranscription, disconnect]);
+
+    const handleRecordingStop = React.useCallback(async (audioBlob: Blob) => {
+        liveTranscriptionCancelledRef.current = true;
+        isRecorderPausedRef.current = false;
+        setIsRecorderPaused(false);
+        setFinalizationStep(1);
+        setFidelityScore(null);
+        setFidelityReasoning(null);
+        setFidelitySource(null);
+        stopSession();
+        cleanupLiveTranscription();
+
+        const audioFile = new File([audioBlob], `session-${currentAppointment.id}-${Date.now()}.webm`, { type: audioBlob.type });
+
+        await uploadAudioFile(audioFile);
+    }, [cleanupLiveTranscription, currentAppointment.id, stopSession, uploadAudioFile]);
+
+    const handleRecordingPauseChange = React.useCallback((paused: boolean) => {
+        isRecorderPausedRef.current = paused;
+        setIsRecorderPaused(paused);
+    }, []);
+
+    React.useEffect(() => {
+        if (activeMainTab === "transcript") {
+            transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
+    }, [activeMainTab, displayedTranscript, draftTranscript]);
+
+    React.useEffect(() => {
+        if (displayedTranscript.length === 0) {
+            return;
+        }
+
+        setSpeakerMapping((prev) => {
+            const next = { ...prev };
+            displayedTranscript.forEach((segment) => {
+                if (!next[segment.speaker]) {
+                    next[segment.speaker] = speakerRoles[segment.speaker] || segment.speaker;
+                }
+            });
+            return next;
+        });
+    }, [displayedTranscript, speakerRoles]);
+
+    React.useEffect(() => {
+        return () => {
+            cleanupLiveTranscription();
+            disconnect();
+        };
+    }, [cleanupLiveTranscription, disconnect]);
+
+    React.useEffect(() => {
+        if (!hasMountedPanelRef.current) {
+            hasMountedPanelRef.current = true;
+            return;
+        }
+
+        setIsPanelRendering(true);
+
+        if (panelRenderTimeoutRef.current) {
+            clearTimeout(panelRenderTimeoutRef.current);
+        }
+
+        panelRenderTimeoutRef.current = setTimeout(() => {
+            setIsPanelRendering(false);
+            panelRenderTimeoutRef.current = null;
+        }, 280);
+    }, [activeMainTab]);
+
+    React.useEffect(() => {
+        return () => {
+            if (panelRenderTimeoutRef.current) {
+                clearTimeout(panelRenderTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    React.useEffect(() => {
+        if (startSignal === 0 || !pendingStartAfterLanguageSelection) {
+            return;
+        }
+
+        const startServer = async () => {
+            setIsServerWarming(true);
+            setIsLiveConnecting(true);
+            setActiveMainTab("context");
+
+            try {
+                const connectedToSocket = await connect();
+                if (!connectedToSocket) {
+                    throw new Error("WebSocket unavailable");
+                }
+
+                const ready = await waitForServerReady(240000);
+                if (!ready) {
+                    throw new Error("Server warmup timed out");
+                }
+            } catch (error) {
+                console.error("Failed to warm up live transcription service", error);
+                toast({
+                    title: "Server warm-up failed",
+                    description: "Could not get a ready signal from Modal in time. First cold start can take 2-4 minutes, then retry.",
+                    variant: "destructive",
+                });
+                disconnect();
+            } finally {
+                setIsServerWarming(false);
+                setIsLiveConnecting(false);
+                // Allow recording to start after warm-up completes
+                setPendingStartAfterLanguageSelection(false);
+            }
+        };
+
+        void startServer();
+    }, [startSignal, pendingStartAfterLanguageSelection, connect, disconnect, waitForServerReady, toast]);
+
+    async function uploadAudioFile(audioFile: File) {
+        setIsProcessing(true);
+        setIsFinalizationDialogOpen(true);
+        setIsUploading(true);
+        setUploadProgress(0);
+        setFinalizationStep(1);
+        setFinalSpeakerDraftMapping({});
+
+        await new Promise(resolve => setTimeout(resolve, 400));
+
+        try {
+            console.log("Starting upload with file:", audioFile.name, audioFile.type, audioFile.size);
+            const res = await startUpload([audioFile], {
+                appointmentId: currentAppointment.id,
+            });
+            console.log("Upload result:", res);
+
+            if (res && res[0]) {
+                const uploadedFile = res[0] as {
+                    ufsUrl?: string;
+                    appUrl?: string;
+                    url?: string;
+                    serverData?: {
+                        recordingUrl?: string;
+                    };
+                };
+                const uploadedRecordingUrl = uploadedFile.serverData?.recordingUrl || uploadedFile.ufsUrl || uploadedFile.appUrl || uploadedFile.url;
+
+                if (!uploadedRecordingUrl) {
+                    throw new Error("Upload succeeded but no file URL was returned by UploadThing");
+                }
+
+                console.log("Uploaded URL:", uploadedRecordingUrl);
+                setRecordingUrl(uploadedRecordingUrl);
+                setTempRecordingUrl(uploadedRecordingUrl);
+
+                setUploadProgress(100);
+                setFinalizationStep(2);
+
+                // Fidelity is computed on the WebSocket worker (same Modal container as transcription).
+                // HTTP POST often hits a different concurrent worker and would miss in-memory `sessions`.
+                const wsFidelity = await waitForFidelityResult(120000);
+                if (wsFidelity) {
+                    console.log("[clinical] Fidelity from WebSocket (same Modal worker):", wsFidelity);
+                    if (wsFidelity.fidelity_source === "gemini" && typeof wsFidelity.fidelity_score === "number") {
+                        setFidelityScore(wsFidelity.fidelity_score);
+                    } else {
+                        setFidelityScore(null);
+                    }
+                    if (wsFidelity.fidelity_reasoning) {
+                        setFidelityReasoning(wsFidelity.fidelity_reasoning);
+                    }
+                    setFidelitySource(wsFidelity.fidelity_source || null);
+                    if (wsFidelity.gemini_raw) {
+                        console.log("[clinical] Gemini raw text:", wsFidelity.gemini_raw);
+                    }
+                }
+
+                if ((!wsFidelity || wsFidelity.fidelity_source !== "gemini") && sessionId) {
+                    try {
+                        const response = await fetch(`${pythonBackendUrl}/api/end-session/${sessionId}`, {
+                            method: "POST",
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            console.log("[clinical] Fidelity API fallback response:", data);
+                            if (data.fidelity_source === "gemini" && typeof data.fidelity_score === "number") {
+                                setFidelityScore(data.fidelity_score);
+                                setFidelityReasoning(typeof data.fidelity_reasoning === "string" ? data.fidelity_reasoning : null);
+                                setFidelitySource(data.fidelity_source);
+                                if (typeof data.gemini_raw === "string" && data.gemini_raw) {
+                                    console.log("[clinical] Gemini raw (HTTP):", data.gemini_raw);
+                                }
+                            }
+                        } else {
+                            const errBody = await response.json().catch(() => ({}));
+                            console.warn("[clinical] Fidelity API fallback not available:", response.status, errBody);
+                        }
+                    } catch (error) {
+                        console.error("[clinical] Fidelity API fallback failed", error);
+                    }
+                }
+
+                // Move to step 3: speaker label editing
+                setFinalizationStep(3);
+
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        } catch (error) {
+            console.error("Upload failed", error);
+            toast({
+                title: "Upload Failed",
+                description: "Could not save the recording. Please try again.",
+                variant: "destructive"
+            });
+        } finally {
+            setIsUploading(false);
+            setIsProcessing(false);
+        }
+    }
+
+    const handleManualUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        if (!file.type.startsWith("audio/")) {
+            toast({
+                title: "Invalid File",
+                description: "Please select a valid audio file.",
+                variant: "destructive",
+            });
+            event.target.value = "";
+            return;
+        }
+
+        await uploadAudioFile(file);
+        event.target.value = "";
+    };
+
+    const loadActiveTemplates = React.useCallback(async () => {
+        setHasAttemptedNoteTemplateLoad(true);
+        setIsLoadingNoteTemplates(true);
+        try {
+            const result = await getActiveNoteTemplatesForSession();
+            if (!result.success) {
+                toast({
+                    title: "Template load failed",
+                    description: result.error || "Could not fetch active templates from Note Studio.",
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            const templates = result.templates || [];
+            setNoteTemplates(templates);
+
+            const savedTemplateId = String((currentAppointment as any)?.soapNote?.template?.id || "");
+
+            setSelectedTemplateId((current) => {
+                if (current && templates.some((template) => template.id === current)) {
+                    return current;
+                }
+                if (savedTemplateId && templates.some((template) => template.id === savedTemplateId)) {
+                    return savedTemplateId;
+                }
+                if (result.defaultTemplateId) {
+                    return result.defaultTemplateId;
+                }
+                return templates[0]?.id || "";
+            });
+        } catch (error) {
+            console.error("Failed to load active templates", error);
+            toast({
+                title: "Template load failed",
+                description: "Unexpected error while loading templates.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsLoadingNoteTemplates(false);
+        }
+    }, [currentAppointment, toast]);
+
+    const handleGenerateTemplateNote = React.useCallback(async () => {
+        if (!selectedTemplateId) {
+            toast({
+                title: "Select a template",
+                description: "Choose an active template before generating note text.",
+                variant: "destructive",
+            });
+            return;
+        }
+
+        if (!isTranscriptReadyForNote) {
+            toast({
+                title: "Transcript required",
+                description: "Complete transcription first, then click Generate to create the note.",
+                variant: "destructive",
+            });
+            return;
+        }
+
+        setIsGeneratingNote(true);
+        try {
+            const result = await generateAppointmentNoteFromTemplate(currentAppointment.id, selectedTemplateId, {
+                transcriptSegments: mappedTranscript,
+                transcriptText: mappedTranscript
+                    .map((segment) => `[${segment.speaker}] ${segment.text}`)
+                    .join("\n"),
+                facts,
+                speakerMapping,
+            });
+            if (!result.success || !result.noteText || !result.noteData) {
+                toast({
+                    title: "Note generation failed",
+                    description: result.error || "Could not generate a template note for this session.",
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            setGeneratedNoteText(result.noteText);
+            setEditableNoteData(result.noteData);
+            setIsNoteDirty(false);
+            setHasGeneratedNoteCheckpoint(true);
+
+            const latestSessionData = await getClinicalSessionData(currentAppointment.id);
+            if (latestSessionData) {
+                setCurrentAppointment(latestSessionData);
+            }
+
+            toast({
+                title: "Note generated",
+                description: `${result.templateName || "Template"} note has been generated and saved.`,
+            });
+        } catch (error) {
+            console.error("Failed to generate template note", error);
+            toast({
+                title: "Note generation failed",
+                description: "Unexpected error while generating note.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsGeneratingNote(false);
+        }
+    }, [currentAppointment.id, facts, isTranscriptReadyForNote, mappedTranscript, selectedTemplateId, speakerMapping, toast]);
+
+    const handleNoteFieldChange = React.useCallback((fieldKey: string, nextValue: unknown) => {
+        setEditableNoteData((prev) => ({
+            ...prev,
+            [fieldKey]: nextValue,
+        }));
+        setIsNoteDirty(true);
+    }, []);
+
+    const handleSaveTemplateNote = React.useCallback(async () => {
+        if (!selectedTemplateId) {
+            toast({
+                title: "Select a template",
+                description: "Choose an active template before saving note edits.",
+                variant: "destructive",
+            });
+            return;
+        }
+
+        setIsSavingNote(true);
+        try {
+            const result = await saveAppointmentTemplateNoteDraft(currentAppointment.id, selectedTemplateId, editableNoteData);
+            if (!result.success || !result.noteText || !result.noteData) {
+                toast({
+                    title: "Save failed",
+                    description: result.error || "Could not save note changes.",
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            setGeneratedNoteText(result.noteText);
+            setEditableNoteData(result.noteData);
+            setIsNoteDirty(false);
+
+            const latestSessionData = await getClinicalSessionData(currentAppointment.id);
+            if (latestSessionData) {
+                setCurrentAppointment(latestSessionData);
+            }
+
+            toast({
+                title: "Note saved",
+                description: "Your note edits were saved successfully.",
+            });
+        } catch (error) {
+            console.error("Failed to save template note", error);
+            toast({
+                title: "Save failed",
+                description: "Unexpected error while saving note edits.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsSavingNote(false);
+        }
+    }, [currentAppointment.id, editableNoteData, selectedTemplateId, toast]);
+
+    React.useEffect(() => {
+        const payloadNoteText = extractNoteTextFromPayload(currentAppointment?.soapNote);
+        const payloadNoteData = extractNoteDataFromPayload(currentAppointment?.soapNote);
+
+        setGeneratedNoteText(payloadNoteText);
+        setHasGeneratedNoteCheckpoint(payloadNoteText.trim().length > 0 || hasNonEmptyNoteData(payloadNoteData));
+        if (Object.keys(payloadNoteData).length > 0) {
+            setEditableNoteData(payloadNoteData);
+            setIsNoteDirty(false);
+        }
+    }, [currentAppointment?.soapNote]);
+
+    React.useEffect(() => {
+        if (activeMainTab !== "note") {
+            return;
+        }
+        if (noteTemplates.length > 0 || isLoadingNoteTemplates || hasAttemptedNoteTemplateLoad) {
+            return;
+        }
+
+        void loadActiveTemplates();
+    }, [activeMainTab, hasAttemptedNoteTemplateLoad, isLoadingNoteTemplates, loadActiveTemplates, noteTemplates.length]);
+
+    React.useEffect(() => {
+        setHasAttemptedNoteTemplateLoad(false);
+    }, [currentAppointment.id]);
+
+    React.useEffect(() => {
+        if (!selectedTemplate) {
+            return;
+        }
+
+        setIsNoteDirty(false);
+
+        setEditableNoteData((prev) => {
+            const defaults = buildDefaultNoteData(selectedTemplate);
+            const next = selectedTemplate.bodySchema.fields.reduce<Record<string, unknown>>((acc, field) => {
+                if (Object.prototype.hasOwnProperty.call(prev, field.key)) {
+                    acc[field.key] = prev[field.key];
+                    return acc;
+                }
+                acc[field.key] = defaults[field.key];
+                return acc;
+            }, {});
+
+            return next;
+        });
+    }, [selectedTemplate]);
+
+    React.useEffect(() => {
+        if (!selectedTemplate) {
+            return;
+        }
+
+        try {
+            const noteText = renderNotePreviewFromObject(selectedTemplate, editableNoteData, resolvedNoteMetadata);
+            if (noteText.trim().length > 0) {
+                setGeneratedNoteText(noteText);
+            }
+        } catch {
+            // Ignore preview rendering errors until template/note data is complete.
+        }
+    }, [editableNoteData, resolvedNoteMetadata, selectedTemplate]);
+
+    const openLinkPatientDialog = async () => {
+        setIsLinkPatientDialogOpen(true);
+
+        if (linkablePatients.length > 0) {
+            return;
+        }
+
+        setIsLoadingPatients(true);
+        try {
+            const patients = await getDoctorPatientsForLinking();
+            setLinkablePatients(patients);
+        } catch (error) {
+            console.error("Failed to load patients for linking", error);
+            toast({
+                title: "Could not load patients",
+                description: "Please try again.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsLoadingPatients(false);
+        }
+    };
+
+    const handleLinkPatient = async (patientId: string) => {
+        setIsLinkingPatient(true);
+        try {
+            const result = await linkPatientToAppointment(currentAppointment.id, patientId);
+            if (!result.success || !result.appointment) {
+                toast({
+                    title: "Link failed",
+                    description: result.error || "Could not link patient to this session.",
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            setCurrentAppointment(result.appointment);
+            setIsLinkPatientDialogOpen(false);
+            toast({
+                title: "Patient linked",
+                description: "Patient is now attached to this clinical session.",
+            });
+        } catch (error) {
+            console.error("Failed to link patient", error);
+            toast({
+                title: "Link failed",
+                description: "Could not link patient to this session.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsLinkingPatient(false);
+        }
+    };
+
+    const handlePatientPrimaryAction = () => {
+        if (hasLinkedPatient && currentAppointment.patient?.id) {
+            router.push(`/doctor/patients/${currentAppointment.patient.id}`);
+            return;
+        }
+
+        const returnTo = `/doctor/clinical-session/${currentAppointment.id}`;
+        const params = new URLSearchParams({
+            mode: "link",
+            appointmentId: currentAppointment.id,
+            returnTo,
+        });
+        router.push(`/doctor/patients?${params.toString()}`);
+    };
+
+    const loadFinalizeChecklist = React.useCallback(async (showErrors = true) => {
+        setIsFinalizeChecklistLoading(true);
+        try {
+            const result = await getAppointmentFinalizeChecklist(currentAppointment.id);
+            setFinalizeChecklistResult(result);
+
+            if (!result.success && showErrors) {
+                toast({
+                    title: "Could not load checklist",
+                    description: result.error || "Unable to fetch finalize session checklist.",
+                    variant: "destructive",
+                });
+            }
+        } catch (error) {
+            console.error("Failed to load finalize checklist", error);
+            setFinalizeChecklistResult(null);
+            if (showErrors) {
+                toast({
+                    title: "Could not load checklist",
+                    description: "Unexpected error while loading finalize session checklist.",
+                    variant: "destructive",
+                });
+            }
+        } finally {
+            setIsFinalizeChecklistLoading(false);
+        }
+    }, [currentAppointment.id, toast]);
+
+    const openFinalizeDialog = React.useCallback(() => {
+        setIsFinalizeDialogOpen(true);
+        void loadFinalizeChecklist();
+    }, [loadFinalizeChecklist]);
+
+    React.useEffect(() => {
+        if (hasAutoOpenedFinalizeRef.current) {
+            return;
+        }
+
+        const shouldResumeFinalize = searchParams.get("finalize") === "1";
+        if (!shouldResumeFinalize) {
+            return;
+        }
+
+        hasAutoOpenedFinalizeRef.current = true;
+
+        const focusTask = searchParams.get("focusTask");
+        if (focusTask === "transcriptReady") {
+            setActiveMainTab("transcript");
+        } else if (focusTask === "noteReady") {
+            setActiveMainTab("note");
+        }
+
+        setIsFinalizeDialogOpen(true);
+        void loadFinalizeChecklist();
+    }, [loadFinalizeChecklist, searchParams]);
+
+    const handleFinalizeTaskAction = React.useCallback((taskKey: "patientLinked" | "transcriptReady" | "noteReady") => {
+        if (taskKey === "patientLinked") {
+            if (hasLinkedPatient) {
+                handlePatientPrimaryAction();
+                return;
+            }
+
+            setIsFinalizeDialogOpen(false);
+            const returnTo = `/doctor/clinical-session/${currentAppointment.id}`;
+            const params = new URLSearchParams({
+                mode: "link",
+                appointmentId: currentAppointment.id,
+                returnTo,
+            });
+            router.push(`/doctor/patients?${params.toString()}`);
+            return;
+        }
+
+        if (taskKey === "transcriptReady") {
+            setActiveMainTab("transcript");
+            setIsFinalizeDialogOpen(false);
+            return;
+        }
+
+        setActiveMainTab("note");
+        setIsFinalizeDialogOpen(false);
+    }, [currentAppointment.id, handlePatientPrimaryAction, hasLinkedPatient, router]);
+
+    const openSpeakerReview = React.useCallback(() => {
+        if (displayedTranscript.length === 0) {
+            toast({
+                title: "Transcript required",
+                description: "No transcript is available to review speakers.",
+                variant: "destructive",
+            });
+            return;
+        }
+
+        const uniqueSpeakers = Array.from(new Set(displayedTranscript.map((segment) => segment.speaker))).sort();
+        const draft: Record<string, string> = {};
+        uniqueSpeakers.forEach((speakerId) => {
+            draft[speakerId] = speakerMapping[speakerId] || speakerRoles[speakerId] || speakerId;
+        });
+        setSpeakerDraftMapping(draft);
+        setIsSpeakerReviewOpen(true);
+    }, [displayedTranscript, speakerMapping, speakerRoles, toast]);
+
+    const handleSaveTranscription = React.useCallback(async () => {
+        setIsSavingToDatabase(true);
+        try {
+            // Save transcript and facts to database
+            const transcriptionResult = await confirmAndSaveAppointmentTranscription(currentAppointment.id);
+            
+            if (!transcriptionResult.success) {
+                toast({
+                    title: "Save failed",
+                    description: transcriptionResult.error || "Could not save transcript and facts.",
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            // Save extracted facts
+            const artifactSaveResult = await saveSessionFinalArtifacts(currentAppointment.id, {
+                extractedFacts: facts as Record<string, unknown>,
+                finalTranscript: mappedTranscript as unknown,
+            });
+
+            if (!artifactSaveResult.success) {
+                toast({
+                    title: "Warning",
+                    description: artifactSaveResult.error || "Transcript saved but facts could not be stored.",
+                    variant: "destructive",
+                });
+            }
+
+            // Reload the finalize checklist to update status
+            await loadFinalizeChecklist(false);
+
+            // Move to step 4 (speaker label editing)
+            setFinalizationStep(4);
+
+            // Open speaker review dialog
+            openSpeakerReview();
+
+            toast({
+                title: "Transcript saved",
+                description: "Transcript and facts have been saved. Please review speakers.",
+            });
+        } catch (error) {
+            console.error("Failed to save transcription", error);
+            toast({
+                title: "Save failed",
+                description: "Could not save the transcript. Please try again.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsSavingToDatabase(false);
+        }
+    }, [currentAppointment.id, facts, mappedTranscript, loadFinalizeChecklist, openSpeakerReview, toast]);
+
+    const handleFinalizeSession = React.useCallback(async () => {
+        setIsFinalizingSession(true);
+        try {
+            const result = await finalizeAppointmentSession(currentAppointment.id);
+            setFinalizeChecklistResult(result);
+
+            if (!result.success) {
+                toast({
+                    title: "Session not ready to finalize",
+                    description: result.error || "Complete required steps before finalizing.",
+                    variant: "destructive",
+                });
+                void loadFinalizeChecklist();
+                return;
+            }
+
+            setCurrentAppointment((prev: any) => ({
+                ...prev,
+                status: "COMPLETED",
+            }));
+            setIsFinalizeDialogOpen(false);
+
+            toast({
+                title: "Clinical session finalized",
+                description: "Session status is now completed.",
+            });
+        } catch (error) {
+            console.error("Failed to finalize session", error);
+            toast({
+                title: "Finalize failed",
+                description: "Unexpected error while finalizing this session.",
+                variant: "destructive",
+            });
+            void loadFinalizeChecklist();
+        } finally {
+            setIsFinalizingSession(false);
+        }
+    }, [currentAppointment.id, loadFinalizeChecklist, toast]);
+
+    const handleSaveSpeakerReview = React.useCallback(async () => {
+        const cleanedMapping = Object.fromEntries(
+            Object.entries(speakerDraftMapping).map(([speakerId, name]) => [speakerId, String(name || "").trim() || speakerId]),
+        );
+        setSpeakerMapping((prev) => ({ ...prev, ...cleanedMapping }));
+        setIsSpeakerReviewOpen(false);
+
+        try {
+            if (sessionId) {
+                setIsGeneratingSoap(true);
+                const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                const soapResponse = await fetch(`${baseUrl}/api/soap/${sessionId}`, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                        transcript: displayedTranscript.map((segment) => ({
+                            ...segment,
+                            speaker: cleanedMapping[segment.speaker] || segment.speaker,
+                        })),
+                        facts,
+                        speaker_mapping: cleanedMapping,
+                    }),
+                });
+                if (!soapResponse.ok) {
+                    throw new Error(`SOAP request failed (${soapResponse.status})`);
+                }
+            }
+
+            if (selectedTemplateId) {
+                await handleGenerateTemplateNote();
+            }
+
+            await handleFinalizeSession();
+        } catch (error) {
+            console.error("Failed during speaker review finalize flow", error);
+            toast({
+                title: "Finalize failed",
+                description: "Could not complete speaker-reviewed finalization. Please try again.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsGeneratingSoap(false);
+        }
+    }, [
+        displayedTranscript,
+        facts,
+        handleFinalizeSession,
+        handleGenerateTemplateNote,
+        selectedTemplateId,
+        sessionId,
+        speakerDraftMapping,
+        toast,
+    ]);
+
+    const localFinalizeChecklist = React.useMemo(
+        () => ({
+            patientLinked: hasLinkedPatient,
+            transcriptReady: isTranscriptReadyForNote,
+            noteReady: isTranscriptReadyForNote && hasGeneratedNoteCheckpoint,
+        }),
+        [hasGeneratedNoteCheckpoint, hasLinkedPatient, isTranscriptReadyForNote],
+    );
+    const isSessionFinalized = currentAppointment.status === "COMPLETED";
+    const finalizeChecklist = finalizeChecklistResult?.checklist ?? localFinalizeChecklist;
+    const finalizeBlockersByKey = React.useMemo(
+        () =>
+            new Map(
+                (finalizeChecklistResult?.blockers || []).map((blocker) => [
+                    blocker.key,
+                    blocker,
+                ]),
+            ),
+        [finalizeChecklistResult?.blockers],
+    );
+    const canFinalizeSession = isSessionFinalized
+        || (finalizeChecklistResult?.canFinalize
+            ?? (finalizeChecklist.patientLinked && finalizeChecklist.transcriptReady && finalizeChecklist.noteReady));
+
+    const finalizeTasks: Array<{
+        key: "patientLinked" | "transcriptReady" | "noteReady";
+        label: string;
+        description: string;
+        complete: boolean;
+    }> = [
+            {
+                key: "patientLinked",
+                label: "Patient linked",
+                description: finalizeChecklist.patientLinked
+                    ? "Patient is linked and ready for finalization."
+                    : finalizeBlockersByKey.get("patientLinked")?.description || "Attach this session to the correct patient profile.",
+                complete: finalizeChecklist.patientLinked,
+            },
+            {
+                key: "transcriptReady",
+                label: "Transcript ready",
+                description: finalizeChecklist.transcriptReady
+                    ? "Transcript is available for this session."
+                    : finalizeBlockersByKey.get("transcriptReady")?.description
+                    || (finalizeChecklistResult?.aiStatus === "PROCESSING"
+                        ? "Transcription is still processing. Check Transcript to monitor progress."
+                        : "Record or upload audio, then confirm transcription."),
+                complete: finalizeChecklist.transcriptReady,
+            },
+            {
+                key: "noteReady",
+                label: "Visit note generated",
+                description: finalizeChecklist.noteReady
+                    ? "Visit note is generated and available."
+                    : finalizeBlockersByKey.get("noteReady")?.description
+                    || (!finalizeChecklist.transcriptReady
+                        ? "Complete transcript first, then click Generate in the Note tab."
+                        : "Click Generate in the Note tab, then review the generated note."),
+                complete: finalizeChecklist.noteReady,
+            },
+        ];
+    const finalizeTrackingTasks = React.useMemo(
+        () => finalizeTasks.map((task) => ({
+            ...task,
+            complete: isSessionFinalized ? true : task.complete,
+        })),
+        [finalizeTasks, isSessionFinalized],
+    );
+    const isMainPanelBusy = isPanelRendering
+        || (activeMainTab === "transcript" && isLiveConnecting)
+        || (activeMainTab === "note" && (isLoadingNoteTemplates || isGeneratingNote || isSavingNote));
+
+    const loadPatientMetricCatalog = React.useCallback(async () => {
+        if (!currentAppointment?.id || !currentAppointment?.patient?.user?.id) {
+            setPatientMetricCatalog([]);
+            setMetricCatalogError(null);
+            return;
+        }
+
+        setIsMetricCatalogLoading(true);
+        setMetricCatalogError(null);
+        try {
+            const result = await getAppointmentPatientMetricCatalog(currentAppointment.id);
+            if (!result.success) {
+                setPatientMetricCatalog([]);
+                setMetricCatalogError(result.error || "Could not load patient metric catalog.");
+                return;
+            }
+
+            setPatientMetricCatalog(result.metrics);
+        } catch (error) {
+            console.error("Failed to load patient metric catalog", error);
+            setPatientMetricCatalog([]);
+            setMetricCatalogError("Could not load patient metric catalog.");
+        } finally {
+            setIsMetricCatalogLoading(false);
+        }
+    }, [currentAppointment?.id, currentAppointment?.patient?.user?.id]);
+
+    React.useEffect(() => {
+        void loadPatientMetricCatalog();
+    }, [loadPatientMetricCatalog]);
+
+    const filteredPatientMetrics = React.useMemo(() => {
+        const query = metricCatalogSearch.trim().toLowerCase();
+        if (!query) {
+            return patientMetricCatalog;
+        }
+
+        return patientMetricCatalog.filter((metric) => metric.includes(query));
+    }, [metricCatalogSearch, patientMetricCatalog]);
+
+    const handleMetricChatRequestHandled = React.useCallback((requestId: number) => {
+        setPendingMetricChatRequest((current) => {
+            if (!current || current.id !== requestId) {
+                return current;
+            }
+
+            return null;
+        });
+    }, []);
+
+    const handleMetricChipClick = React.useCallback((metric: string) => {
+        metricChatRequestIdRef.current += 1;
+        setIsChatPanelOpen(true);
+        setPendingMetricChatRequest({
+            id: metricChatRequestIdRef.current,
+            metric,
+        });
+    }, []);
+
+    const handleDeleteAppointment = async () => {
+        setIsDeletingAppointment(true);
+        try {
+            const result = await deleteAppointmentSession(currentAppointment.id);
+            if (!result.success) {
+                toast({
+                    title: "Delete failed",
+                    description: result.error || "Could not delete this session.",
+                    variant: "destructive",
+                });
+                return;
+            }
+
+            setIsDeleteDialogOpen(false);
+            toast({
+                title: "Session deleted",
+                description: "Appointment has been deleted successfully.",
+            });
+            if (typeof window !== "undefined") {
+                window.dispatchEvent(new Event("appointments:refresh"));
+            }
+            router.replace("/doctor/dashboard");
+        } catch (error) {
+            console.error("Failed to delete appointment", error);
+            toast({
+                title: "Delete failed",
+                description: "Could not delete this session.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsDeletingAppointment(false);
+        }
+    };
+
+    const handleToggleChatPane = React.useCallback(() => {
+        setIsChatPanelOpen((prev) => !prev);
+    }, []);
+
+    React.useEffect(() => {
+        if (!isChatPanelOpen) {
+            return;
+        }
+
+        window.dispatchEvent(
+            new CustomEvent(CLINICAL_CHAT_PANE_EVENT, {
+                detail: { open: true },
+            }),
+        );
+    }, [isChatPanelOpen]);
+
+    React.useEffect(() => {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+        if (isChatPanelOpen) {
+            setIsChatPanelContentVisible(false);
+            timeoutId = setTimeout(() => {
+                setIsChatPanelContentVisible(true);
+            }, CHAT_PANEL_TRANSITION_MS + CHAT_PANEL_CONTENT_FADE_DELAY_MS);
+        } else {
+            setIsChatPanelContentVisible(false);
+        }
+
+        return () => {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        };
+    }, [isChatPanelOpen]);
+
+    const updatePullTabPosition = React.useCallback(() => {
+        const rootRect = rootContainerRef.current?.getBoundingClientRect();
+        const tabsRect = tabsRowRef.current?.getBoundingClientRect();
+        if (!rootRect || !tabsRect) {
+            return;
+        }
+
+        setPullTabTop(tabsRect.top - rootRect.top + (tabsRect.height / 2));
+    }, []);
+
+    React.useEffect(() => {
+        updatePullTabPosition();
+
+        window.addEventListener("resize", updatePullTabPosition);
+        return () => {
+            window.removeEventListener("resize", updatePullTabPosition);
+        };
+    }, [updatePullTabPosition]);
+
+    React.useEffect(() => {
+        const onSubSidebarRequest = (event: Event) => {
+            const customEvent = event as CustomEvent<{ open?: boolean }>;
+            if (customEvent.detail?.open) {
+                setIsChatPanelOpen(false);
+            }
+        };
+
+        window.addEventListener(CLINICAL_SUB_SIDEBAR_EVENT, onSubSidebarRequest as EventListener);
+        return () => {
+            window.removeEventListener(CLINICAL_SUB_SIDEBAR_EVENT, onSubSidebarRequest as EventListener);
+        };
+    }, []);
+
+    const chatRuntime = useChatRuntime({
+        transport: new AssistantChatTransport({
+            api: "/api/chat",
+            body: {
+                chatContext: {
+                    appointmentId: currentAppointment?.id ?? null,
+                    patientProfileId: currentAppointment?.patient?.id ?? null,
+                    patientUserId: currentAppointment?.patient?.user?.id ?? null,
+                    patientMetricCatalog,
+                    includePatientDocuments: true,
+                    retrievalMode,
+                },
+            },
+        }),
+    });
+
+    React.useEffect(() => {
+        if (!pendingMetricChatRequest) {
+            return;
+        }
+
+        const { id, metric } = pendingMetricChatRequest;
+        const prompt = `Run structured retrieval for normalized metric "${metric}" for this patient. Return complete metric history (all available readings), render the full markdown table (Date, Metric, Value, Unit, Source), and also call out the most recent reading separately.`;
+
+        try {
+            chatRuntime.thread.append({
+                role: "user",
+                content: [{ type: "text", text: prompt }],
+                startRun: true,
+            });
+        } catch (error) {
+            console.error("Failed to append metric retrieval request", error);
+        } finally {
+            handleMetricChatRequestHandled(id);
+        }
+    }, [chatRuntime, handleMetricChatRequestHandled, pendingMetricChatRequest]);
+
+    return (
+        <div ref={rootContainerRef} className="relative flex h-[calc(100svh-3rem)] overflow-hidden bg-background">
+            <div className="min-w-0 flex flex-1 flex-col">
+                <header className="px-4 sm:px-5 py-3 border-b-2 border-border bg-background/95 backdrop-blur z-10">
+                    <div className="flex flex-col gap-2.5">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0 text-left">
+                                <button
+                                    type="button"
+                                    className="rounded-full cursor-pointer"
+                                    onClick={handlePatientPrimaryAction}
+                                    aria-label={hasLinkedPatient ? "Open patient profile" : "Link patient"}
+                                >
+                                    <Avatar className="h-10 w-10 border">
+                                        <AvatarImage src={patientImage || undefined} alt={patientName} />
+                                        <AvatarFallback>{patientInitials}</AvatarFallback>
+                                    </Avatar>
+                                </button>
+                                <div className="flex flex-col min-w-0">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <h1 className="text-lg sm:text-xl font-black tracking-tight text-foreground truncate">{patientName}</h1>
+                                        {hasLinkedPatient && (
+                                            <Badge variant="outline" className="shrink-0 border-2 border-border bg-muted text-foreground font-semibold">Patient</Badge>
+                                        )}
+                                        {!hasLinkedPatient && (
+                                            <Tooltip>
+                                                <TooltipTrigger asChild>
+                                                    <button
+                                                        type="button"
+                                                        className="shrink-0"
+                                                        onClick={handlePatientPrimaryAction}
+                                                        aria-label="Link patient"
+                                                    >
+                                                        <Badge variant="outline" className="border-2 border-border bg-muted text-foreground font-semibold hover:bg-muted/80 cursor-pointer">Unlinked</Badge>
+                                                    </button>
+                                                </TooltipTrigger>
+                                                <TooltipContent side="bottom">Link patient</TooltipContent>
+                                            </Tooltip>
+                                        )}
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <button
+                                                    type="button"
+                                                    className="p-0 m-0 text-red-500 hover:text-red-600 disabled:opacity-50"
+                                                    onClick={() => setIsDeleteDialogOpen(true)}
+                                                    disabled={isDeletingAppointment}
+                                                    title="Delete session"
+                                                    aria-label="Delete session"
+                                                >
+                                                    <Trash className="h-4 w-4" strokeWidth={2} />
+                                                </button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="bottom">Delete session</TooltipContent>
+                                        </Tooltip>
+                                    </div>
+                                    <span className="text-sm text-muted-foreground mt-0.5 font-medium truncate">
+                                        {hasLinkedPatient ? `Reason: ${reason}` : "Click patient icon or Unlinked label to find and link a patient"}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <SessionRecordingActions
+                                isUploading={isUploading}
+                                isWarmingUp={isServerWarming}
+                                startSignal={startSignal}
+                                selectedMicrophoneId={selectedMicrophoneId}
+                                onStartRequest={handleRecordingStartRequest}
+                                onStart={handleRecordingStart}
+                                onPauseChange={handleRecordingPauseChange}
+                                onDiscard={handleRecordingDiscard}
+                                onStop={handleRecordingStop}
+                                onManualUpload={handleManualUpload}
+                                uploadInputRef={uploadInputRef}
+                            />
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 text-sm">
+                            {currentAppointment.status !== "UNLINKED" && (
+                                <Badge variant="outline" className={`gap-1.5 py-1 border-2 ${statusBadgeClass}`}>{statusLabel}</Badge>
+                            )}
+                            <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
+                                <Calendar className="h-3.5 w-3.5" />
+                                {appointmentDate ? format(appointmentDate, "MMMM dd, yyyy") : "No date"}
+                            </Badge>
+                            <Badge variant="outline" className="gap-1.5 py-1 border-2 border-border bg-muted/70">
+                                <Clock3 className="h-3.5 w-3.5" />
+                                {appointmentDate ? format(appointmentDate, "hh:mm a") : "--:--"}
+                            </Badge>
+                            {recordingUrl && (
+                                <Badge className="gap-1.5 py-1 pr-1.5 bg-[#CCFF0B] text-black border-2 border-[#B8E609] hover:bg-[#B8E609]">
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    Recording Attached
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-5 w-5 p-0 rounded-full text-black/75 hover:text-black hover:bg-transparent"
+                                        onClick={() => setIsRecordingInfoOpen(true)}
+                                        aria-label="Recording info"
+                                        title="Recording info"
+                                    >
+                                        <Info className="h-3.5 w-3.5" />
+                                    </Button>
+                                </Badge>
+                            )}
+                        </div>
+                    </div>
+                </header>
+
+                <main className="flex-1 overflow-hidden p-4 pt-6">
+                    <div className="mx-auto flex h-full w-full max-w-[1280px] min-h-0">
+                        <div className="min-w-0 flex flex-1 flex-col gap-2.5">
+                            <div ref={tabsRowRef} className="flex items-center justify-between">
+                                <SessionTabs activeTab={activeMainTab} onTabChange={setActiveMainTab} />
+                            </div>
+
+                            <div className="flex flex-col flex-1 min-h-0 bg-card rounded-xl border shadow-sm overflow-hidden">
+                                <div className="flex items-center justify-between p-2 border-b bg-muted/30">
+                                    <div className="flex items-center gap-2">
+                                        {activeMainTab === "transcript" && (
+                                            <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
+                                                <AudioLines className="h-4 w-4 text-muted-foreground" />
+                                                <span>Live Transcription</span>
+                                            </div>
+                                        )}
+                                        {activeMainTab === "note" && (
+                                            <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
+                                                <PenLine className="h-4 w-4 text-muted-foreground" />
+                                                <span>Template Note</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex items-center gap-1">
+                                        {activeMainTab === "transcript" && (
+                                            <div className="flex items-center gap-2">
+                                                <div className="h-8 px-2 bg-background text-sm font-medium text-foreground flex items-center rounded-md border">
+                                                    {selectedLanguage === "en" ? "English" : selectedLanguage === "ur" ? "Urdu" : "Language"}
+                                                </div>
+
+                                                <DropdownMenu
+                                                    onOpenChange={(open) => {
+                                                        if (open) {
+                                                            void refreshMicrophoneDevices(true, false);
+                                                        }
+                                                    }}
+                                                >
+                                                    <div className="flex items-center border rounded-md bg-background">
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8 border-r rounded-none">
+                                                            <Mic className="w-4 h-4" />
+                                                        </Button>
+                                                        <Badge variant="outline" className="mx-1 gap-1.5 border-border bg-background/80 text-xs font-semibold">
+                                                            <span
+                                                                className={`h-2 w-2 rounded-full ${isLiveConnecting ? "bg-amber-500" : connected ? (isRecorderPaused ? "bg-amber-500" : "bg-emerald-500") : "bg-black shadow-[0_0_8px_1px_rgba(0,0,0,0.45)]"}`}
+                                                                aria-hidden="true"
+                                                            />
+                                                            {isLiveConnecting ? (isServerWarming ? "Warming up Server..." : "Connecting") : connected ? (isRecorderPaused ? "Paused" : `Live · ${sessionId?.slice(-6) || "ready"}`) : "Offline"}
+                                                        </Badge>
+                                                        <DropdownMenuTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-8 w-8 rounded-none px-1"
+                                                                aria-label="Microphone settings"
+                                                                title="Microphone settings"
+                                                            >
+                                                                <ChevronDown className="w-3 h-3" />
+                                                            </Button>
+                                                        </DropdownMenuTrigger>
+                                                    </div>
+
+                                                    <DropdownMenuContent align="end" className="w-72">
+                                                    <DropdownMenuLabel>Microphone Input</DropdownMenuLabel>
+                                                    <DropdownMenuRadioGroup value={selectedMicrophoneId} onValueChange={setSelectedMicrophoneId}>
+                                                        <DropdownMenuRadioItem value="default">System Default</DropdownMenuRadioItem>
+                                                        {selectableMicrophones.map((device, index) => (
+                                                            <DropdownMenuRadioItem key={device.deviceId} value={device.deviceId}>
+                                                                {device.label?.trim() || `Microphone ${index + 1}`}
+                                                            </DropdownMenuRadioItem>
+                                                        ))}
+                                                    </DropdownMenuRadioGroup>
+
+                                                    {selectableMicrophones.length === 0 && (
+                                                        <DropdownMenuItem disabled>No specific microphones detected</DropdownMenuItem>
+                                                    )}
+
+                                                    <DropdownMenuSeparator />
+                                                    <DropdownMenuItem
+                                                        onClick={() => {
+                                                            void refreshMicrophoneDevices(true, true);
+                                                        }}
+                                                        disabled={isLoadingMicrophones}
+                                                    >
+                                                        {isLoadingMicrophones ? "Refreshing devices..." : "Refresh device list"}
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuSeparator />
+                                                    <DropdownMenuItem disabled title={selectedMicrophoneLabel}>
+                                                        Selected: {selectedMicrophoneLabel}
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem disabled>
+                                                        Changes apply on next recording start
+                                                    </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+                                            </div>
+                                        )}
+
+                                        {activeMainTab === "note" && (
+                                            <div className="flex items-center gap-2">
+                                                <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+                                                    <SelectTrigger className="h-8 min-w-[240px] bg-background">
+                                                        <SelectValue placeholder={isLoadingNoteTemplates ? "Loading templates..." : "Select template"} />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {noteTemplates.map((template) => (
+                                                            <SelectItem key={template.id} value={template.id}>
+                                                                {template.name}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    className="h-8"
+                                                    disabled={isGeneratingNote || !selectedTemplateId || !isTranscriptReadyForNote}
+                                                    onClick={handleGenerateTemplateNote}
+                                                    title={isTranscriptReadyForNote ? "Generate note" : "Transcript required before generating note"}
+                                                >
+                                                    {isGeneratingNote ? (
+                                                        <>
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                            Generating
+                                                        </>
+                                                    ) : (
+                                                        "Generate"
+                                                    )}
+                                                </Button>
+
+                                                <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className={`h-8 w-8 rounded-sm ${activeNotePanel === "editor" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                                                    onClick={() => setActiveNotePanel("editor")}
+                                                    title="Editor"
+                                                >
+                                                    <FileCode2 className="h-4 w-4" />
+                                                </Button>
+
+                                                <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className={`h-8 w-8 rounded-sm ${activeNotePanel === "preview" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                                                    onClick={() => setActiveNotePanel("preview")}
+                                                    title="Preview"
+                                                >
+                                                    <FileText className="h-4 w-4" />
+                                                </Button>
+
+                                                <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="h-8 w-8 rounded-sm text-zinc-700 hover:text-zinc-900"
+                                                    title={isSavingNote ? "Saving..." : "Save note"}
+                                                    disabled={isSavingNote || !isNoteDirty || !selectedTemplateId}
+                                                    onClick={() => {
+                                                        void handleSaveTemplateNote();
+                                                    }}
+                                                >
+                                                    {isSavingNote ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                                                </Button>
+
+                                                {selectedTemplate ? (
+                                                    <PDFDownloadLink
+                                                        document={<NoteDocument template={selectedTemplate} llmObject={noteDocumentData} />}
+                                                        fileName={`${selectedTemplate.name.toLowerCase().replace(/\s+/g, "-")}.pdf`}
+                                                        className="inline-flex h-8 w-8 items-center justify-center rounded-sm p-0 text-zinc-700 hover:bg-transparent hover:text-zinc-900"
+                                                        title="Download PDF"
+                                                    >
+                                                        {({ loading }) =>
+                                                            loading ? (
+                                                                <span className="text-[10px] text-muted-foreground">...</span>
+                                                            ) : (
+                                                                <Download className="h-4 w-4" />
+                                                            )
+                                                        }
+                                                    </PDFDownloadLink>
+                                                ) : (
+                                                    <Button
+                                                        type="button"
+                                                        size="icon"
+                                                        variant="ghost"
+                                                        className="h-8 w-8 rounded-sm"
+                                                        disabled
+                                                        title="Download PDF"
+                                                    >
+                                                        <Download className="h-4 w-4" />
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className={`relative flex-1 min-h-0 p-4 ${activeMainTab === "note" ? "bg-white" : "bg-white/50 dark:bg-black/20"}`}>
+                                    {isMainPanelBusy && (
+                                        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-white">
+                                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                                        </div>
+                                    )}
+
+                                    {activeMainTab === "transcript" ? (
+                                        <div className="grid h-full min-h-0 grid-cols-1 gap-4 lg:grid-cols-[65%_35%]">
+                                            <div className="min-h-0 rounded-lg border bg-background/60 p-2">
+                                                <LiveTranscriptPanel
+                                                    transcript={displayedTranscript}
+                                                    draftTranscript={draftTranscript}
+                                                    speakerRoles={speakerRoles}
+                                                    speakerMapping={speakerMapping}
+                                                    transcriptEndRef={transcriptEndRef}
+                                                />
+                                            </div>
+                                            <div className="grid min-h-0 grid-rows-2 gap-4">
+                                                <section className="min-h-0 rounded-lg border bg-background p-3">
+                                                    <div className="mb-2 text-sm font-semibold text-foreground">Live Facts</div>
+                                                    <div className="h-[calc(100%-1.75rem)] overflow-auto rounded-md border bg-muted/20 p-2">
+                                                        {processedFacts.length === 0 ? (
+                                                            <p className="text-xs text-muted-foreground">No extracted facts yet.</p>
+                                                        ) : (
+                                                            <div className="space-y-2">
+                                                                {processedFacts.map((fact, index) => (
+                                                                    <button
+                                                                        key={`${fact.label}-${fact.value}-${index}`}
+                                                                        onClick={() => handleFactClick(fact.timestamp)}
+                                                                        className="w-full text-left rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 transition-colors hover:bg-blue-100 active:bg-blue-200 cursor-pointer"
+                                                                    >
+                                                                        <div className="text-xs font-semibold text-blue-900">{fact.label}</div>
+                                                                        <div className="text-xs text-blue-800 mt-1">{fact.value}</div>
+                                                                        {fact.timestamp !== undefined && (
+                                                                            <div className="text-[10px] text-blue-700 mt-1 opacity-70">
+                                                                                @ {Math.floor(fact.timestamp)}s
+                                                                            </div>
+                                                                        )}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </section>
+                                                <section className="min-h-0 rounded-lg border bg-background p-3">
+                                                    <div className="mb-2 text-sm font-semibold text-foreground">Clinical Alerts</div>
+                                                    <div className="h-[calc(100%-1.75rem)] overflow-auto rounded-md border bg-muted/20 p-2">
+                                                        {alerts.length === 0 ? (
+                                                            <p className="text-xs text-muted-foreground">No alerts received yet.</p>
+                                                        ) : (
+                                                            <div className="space-y-2">
+                                                                {alerts.map((alert, index) => (
+                                                                    <div key={`${alert}-${index}`} className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-950">
+                                                                        {alert}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </section>
+                                            </div>
+                                        </div>
+                                    ) : activeMainTab === "note" ? (
+                                        <div className="flex h-full min-h-0 flex-col gap-3">
+                                            {noteTemplates.length === 0 && !isLoadingNoteTemplates ? (
+                                                <div className="rounded-lg border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+                                                    No templates found. Create or activate one in Note Studio to generate notes.
+                                                </div>
+                                            ) : null}
+
+                                            <div className="flex-1 min-h-0 overflow-y-auto px-1">
+                                                {activeNotePanel === "editor" ? (
+                                                    selectedTemplate ? (
+                                                        <div className="space-y-4 pb-2">
+                                                            {selectedTemplate.bodySchema.fields.map((field) => {
+                                                                const currentValue = editableNoteData[field.key];
+
+                                                                return (
+                                                                    <div key={field.key} className="space-y-1.5">
+                                                                        <label className="text-sm font-medium text-foreground">{field.label}</label>
+
+                                                                        {field.type === "boolean" ? (
+                                                                            <Select
+                                                                                value={String(currentValue ?? false)}
+                                                                                onValueChange={(value) => handleNoteFieldChange(field.key, value === "true")}
+                                                                            >
+                                                                                <SelectTrigger className="w-full bg-white">
+                                                                                    <SelectValue placeholder="Select value" />
+                                                                                </SelectTrigger>
+                                                                                <SelectContent>
+                                                                                    <SelectItem value="true">True</SelectItem>
+                                                                                    <SelectItem value="false">False</SelectItem>
+                                                                                </SelectContent>
+                                                                            </Select>
+                                                                        ) : field.type === "number" ? (
+                                                                            <Input
+                                                                                type="number"
+                                                                                value={typeof currentValue === "number" ? String(currentValue) : ""}
+                                                                                onChange={(event) => {
+                                                                                    const next = event.target.value;
+                                                                                    handleNoteFieldChange(field.key, next === "" ? 0 : Number(next));
+                                                                                }}
+                                                                                className="bg-white"
+                                                                            />
+                                                                        ) : (
+                                                                            <Textarea
+                                                                                value={typeof currentValue === "string" ? currentValue : String(currentValue ?? "")}
+                                                                                onChange={(event) => handleNoteFieldChange(field.key, event.target.value)}
+                                                                                className="min-h-24 bg-white"
+                                                                            />
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-sm text-muted-foreground">
+                                                            Select an active template to start editing note fields.
+                                                        </p>
+                                                    )
+                                                ) : generatedNoteText ? (
+                                                    <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{generatedNoteText}</p>
+                                                ) : (
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Choose a template and click Generate to create note text from this session transcript.
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex h-full min-h-0 flex-col gap-3 rounded-xl border bg-background/70 p-4">
+                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2 text-sm font-medium">
+                                                    <Stethoscope className="h-4 w-4 text-muted-foreground" />
+                                                    Patient Normalized Metric Catalog
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <Badge variant="outline" className="border-border bg-muted/40 text-xs">
+                                                        {patientMetricCatalog.length} metrics
+                                                    </Badge>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="h-8"
+                                                        onClick={() => {
+                                                            void loadPatientMetricCatalog();
+                                                        }}
+                                                        disabled={isMetricCatalogLoading || !hasLinkedPatient}
+                                                    >
+                                                        {isMetricCatalogLoading ? (
+                                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                        ) : (
+                                                            <RotateCcw className="h-3.5 w-3.5" />
+                                                        )}
+                                                        Refresh
+                                                    </Button>
+                                                </div>
+                                            </div>
+
+                                            <p className="text-xs text-muted-foreground">
+                                                Patient context will be shown here, including their reports and metrics.
+                                            </p>
+
+                                            <p className="text-xs text-muted-foreground">
+                                                Chat retrieval maps your question to these normalized SQL metric keys before running structured queries.
+                                            </p>
+
+                                            <Input
+                                                value={metricCatalogSearch}
+                                                onChange={(event) => setMetricCatalogSearch(event.target.value.toLowerCase())}
+                                                placeholder="Search normalized metric keys (e.g. hemoglobin, creatinine, dlc)"
+                                                className="h-9 bg-background"
+                                                disabled={!hasLinkedPatient || isMetricCatalogLoading}
+                                            />
+
+                                            {!hasLinkedPatient ? (
+                                                <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border border-dashed bg-muted/20 p-6 text-sm text-muted-foreground text-center">
+                                                    Link a patient to load the normalized metric catalog for this session.
+                                                </div>
+                                            ) : metricCatalogError ? (
+                                                <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border border-red-200 bg-red-50/50 p-6 text-sm text-red-700 text-center">
+                                                    {metricCatalogError}
+                                                </div>
+                                            ) : isMetricCatalogLoading ? (
+                                                <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border bg-muted/20 p-6 text-sm text-muted-foreground">
+                                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                    Loading normalized metrics...
+                                                </div>
+                                            ) : filteredPatientMetrics.length === 0 ? (
+                                                <div className="flex flex-1 min-h-0 items-center justify-center rounded-lg border bg-muted/20 p-6 text-sm text-muted-foreground text-center">
+                                                    {patientMetricCatalog.length === 0
+                                                        ? "No normalized metrics were found for this patient yet."
+                                                        : "No metrics matched your search."}
+                                                </div>
+                                            ) : (
+                                                <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border bg-background p-3">
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {filteredPatientMetrics.map((metric) => (
+                                                            <button
+                                                                key={metric}
+                                                                type="button"
+                                                                onClick={() => handleMetricChipClick(metric)}
+                                                                className="rounded-md border border-border bg-muted px-2.5 py-1 font-mono text-[11px] transition-colors hover:bg-foreground hover:text-background"
+                                                            >
+                                                                {metric}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="p-2 border-t bg-muted/10 text-xs text-muted-foreground text-center">
+                                    Review your note before use to ensure it accurately represents the visit
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </main>
+
+                <div className="border-t border-border bg-background px-4 sm:px-5 py-2.5">
+                    <div className={`mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center ${isSessionFinalized ? "sm:justify-start" : "sm:justify-between"}`}>
+                        <div className="flex min-w-0 items-center">
+                            <div className="min-w-0 flex-1 overflow-x-auto">
+                                <div className="inline-flex min-w-max items-center">
+                                    {finalizeTrackingTasks.map((task, index) => (
+                                        <React.Fragment key={task.key}>
+                                            {index > 0 && (
+                                                <div className={`mx-1 h-px w-6 ${task.complete ? "bg-emerald-300" : "bg-red-300"}`} />
+                                            )}
+
+                                            <button
+                                                type="button"
+                                                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${task.complete
+                                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                                                    : "border-red-200 bg-red-50 text-red-800 hover:bg-red-100"}`}
+                                                disabled={isSessionFinalized}
+                                                onClick={() => {
+                                                    if (!isSessionFinalized) {
+                                                        handleFinalizeTaskAction(task.key);
+                                                    }
+                                                }}
+                                                title={task.description}
+                                                aria-label={`${task.label}: ${task.complete ? "complete" : "incomplete"}`}
+                                            >
+                                                <span className={`h-2.5 w-2.5 rounded-full ${task.complete ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
+                                                {task.label}
+                                            </button>
+                                        </React.Fragment>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {!isSessionFinalized && (
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 w-8 rounded-full border border-stone-300 bg-white p-0 text-stone-700 hover:bg-stone-100 hover:text-stone-900"
+                                    onClick={() => {
+                                        void loadFinalizeChecklist();
+                                    }}
+                                    disabled={isFinalizeChecklistLoading || isFinalizingSession}
+                                    title="Refresh checklist"
+                                    aria-label="Refresh checklist"
+                                >
+                                    {isFinalizeChecklistLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="default"
+                                    className="h-8 border border-black bg-black text-white hover:bg-stone-800 hover:text-white"
+                                    onClick={openFinalizeDialog}
+                                >
+                                    Finalize Session
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="absolute z-30 h-14 w-6 -translate-y-1/2 rounded-r-none rounded-l-lg border-r-0 bg-background/95 shadow-sm transition-all duration-300"
+                        style={{
+                            top: pullTabTop ? `${pullTabTop}px` : "50%",
+                            right: isChatPanelOpen ? "30rem" : "0.25rem",
+                        }}
+                        onClick={handleToggleChatPane}
+                        aria-label={isChatPanelOpen ? "Collapse chat sidebar" : "Expand chat sidebar"}
+                        aria-expanded={isChatPanelOpen}
+                        aria-controls="clinical-chat-panel"
+                    >
+                        {isChatPanelOpen
+                            ? <ChevronRight className="h-4 w-4" strokeWidth={2.75} />
+                            : <ChevronLeft className="h-4 w-4" strokeWidth={2.75} />}
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent side="left">
+                    {isChatPanelOpen ? "Hide chat sidebar" : "Show chat sidebar"}
+                </TooltipContent>
+            </Tooltip>
+
+            <aside
+                id="clinical-chat-panel"
+                className={`h-full min-h-0 shrink-0 self-stretch border-l border-border/80 bg-card transition-all duration-300 ease-in-out ${isChatPanelOpen
+                    ? "w-[30rem] translate-x-0 opacity-100"
+                    : "w-0 translate-x-4 opacity-0 pointer-events-none"}`}
+            >
+                <div className={`flex h-full min-h-0 flex-col transition-opacity duration-200 ease-out ${isChatPanelContentVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+                    <div className="flex items-center justify-between bg-background px-4 py-3">
+                        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                            New chat
+                        </div>
+                        <Button type="button" variant="ghost" size="sm" className="h-8 text-muted-foreground">
+                            <span className="text-xs">New chat</span>
+                            <ChevronDown className="h-3 w-3" />
+                        </Button>
+                    </div>
+
+                    <div className="flex-1 min-h-0 overflow-hidden">
+                        <AssistantRuntimeProvider runtime={chatRuntime}>
+                            <Thread
+                                patientName={patientName}
+                                retrievalMode={retrievalMode}
+                                onToggleRetrievalMode={handleToggleRetrievalMode}
+                            />
+                        </AssistantRuntimeProvider>
+                    </div>
+
+                </div>
+            </aside>
+
+            <Dialog open={isFinalizationDialogOpen} onOpenChange={setIsFinalizationDialogOpen}>
+                <DialogContent className="sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
+                    <DialogHeader>
+                        <DialogTitle>Finalizing Session</DialogTitle>
+                        <DialogDescription>
+                            We&apos;re wrapping up your recording, computing fidelity, and saving everything to the patient record.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-4 py-4">
+                        <div className="flex items-start gap-3">
+                            <div className="mt-1 h-2 w-2 rounded-full bg-emerald-500" />
+                            <div className="flex-1">
+                                <p className="text-sm font-medium">1. Clearing audio buffer & finishing transcript</p>
+                                <p className="text-xs text-muted-foreground">
+                                    Processing remaining live audio, diarization, and clinical fact extraction.
+                                </p>
+                                <div className="mt-2 h-1.5 w-full max-w-[220px] rounded-full bg-stone-200 overflow-hidden">
+                                    <div
+                                        className="h-full bg-emerald-500 transition-all"
+                                        style={{ width: `${Math.min(uploadProgress || 5, 100)}%` }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex items-start gap-3">
+                            <div className="mt-1 h-2 w-2 rounded-full bg-blue-500" />
+                            <div className="flex-1">
+                                <p className="text-sm font-medium">2. Computing transcript fidelity score</p>
+                                <p className="text-xs text-muted-foreground">
+                                    We compare the transcript against the raw audio to estimate accuracy.
+                                </p>
+                                <div className="mt-2 flex items-center gap-2 text-sm">
+                                    {fidelityScore != null && fidelitySource === "gemini" ? (
+                                        <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                                            Fidelity score: {fidelityScore}/100
+                                        </span>
+                                    ) : (
+                                        finalizationStep < 3 ? (
+                                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                                Waiting for fidelity score...
+                                            </span>
+                                        ) : (
+                                            <span className="text-xs text-amber-700 bg-amber-50 rounded-full px-2 py-0.5">
+                                                Fidelity score unavailable (Gemini did not return a valid score).
+                                            </span>
+                                        )
+                                    )}
+                                </div>
+                                {fidelityReasoning && (
+                                    <p className="mt-1 text-xs text-muted-foreground whitespace-pre-line">
+                                        {fidelityReasoning}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex items-start gap-3">
+                            <div className="mt-1 h-2 w-2 rounded-full bg-purple-500" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium">3. Review speaker labels</p>
+                                <p className="text-xs text-muted-foreground">
+                                    Edit speaker identifications from the transcript.
+                                </p>
+                                {finalizationStep >= 3 && (
+                                    <div className="mt-3 space-y-2 max-h-40 overflow-y-auto">
+                                        {uniqueSpeakerIds.length === 0 ? (
+                                            <p className="text-xs text-muted-foreground">No speakers detected yet.</p>
+                                        ) : (
+                                            <>
+                                                {uniqueSpeakerIds.map((speakerId) => (
+                                                    <div key={speakerId} className="flex items-center gap-2">
+                                                        <span className="min-w-fit text-xs font-medium text-purple-900 bg-purple-100 rounded px-2 py-1">
+                                                            {speakerId}
+                                                        </span>
+                                                        <input
+                                                            type="text"
+                                                            value={finalSpeakerDraftMapping[speakerId] ?? speakerMapping[speakerId] ?? speakerId}
+                                                            onChange={(event) =>
+                                                                setFinalSpeakerDraftMapping((prev) => ({
+                                                                    ...prev,
+                                                                    [speakerId]: event.target.value,
+                                                                }))
+                                                            }
+                                                            placeholder={speakerId}
+                                                            className="flex-1 min-w-0 h-8 px-2 py-1 text-xs rounded border border-border bg-background"
+                                                        />
+                                                    </div>
+                                                ))}
+                                                {finalizationStep === 3 && (
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        className="mt-3 w-full h-8"
+                                                        onClick={() => {
+                                                            // Apply the speaker label changes to the main mapping
+                                                            setSpeakerMapping((prev) => ({
+                                                                ...prev,
+                                                                ...finalSpeakerDraftMapping,
+                                                            }));
+                                                            setFinalizationStep(4);
+                                                        }}
+                                                    >
+                                                        Continue to Save
+                                                    </Button>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="flex items-start gap-3">
+                            <div className="mt-1 h-2 w-2 rounded-full bg-stone-500" />
+                            <div className="flex-1">
+                                <p className="text-sm font-medium">4. Saving to patient record</p>
+                                <p className="text-xs text-muted-foreground">
+                                    When complete, you can safely continue documenting or finalize this visit.
+                                </p>
+                            </div>
+                            {finalizationStep === 4 && (
+                                <div className="h-6 w-6 rounded-full bg-emerald-100 flex items-center justify-center">
+                                    <svg className="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isRecordingInfoOpen} onOpenChange={setIsRecordingInfoOpen}>
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle>Recording saved</DialogTitle>
+                        <DialogDescription>Audio is already attached to this appointment.</DialogDescription>
+                    </DialogHeader>
+                    {recordingUrl && (
+                        <Button variant="link" asChild className="px-0 justify-start">
+                            <a href={recordingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5">
+                                View recording
+                                <Link2 className="h-3.5 w-3.5" />
+                            </a>
+                        </Button>
+                    )}
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isLanguageDialogOpen} onOpenChange={(open) => {
+                if (!open) {
+                    setIsLanguageDialogOpen(false);
+                    // Reset pending flag if dialog is closed without selection
+                    if (!hasConfirmedLanguage) {
+                        setPendingStartAfterLanguageSelection(false);
+                    }
+                }
+            }}>
+                <DialogContent className="sm:max-w-sm" onInteractOutside={(e) => e.preventDefault()}>
+                    <DialogHeader>
+                        <DialogTitle>Select transcription language</DialogTitle>
+                        <DialogDescription>
+                            Choose the primary language you&apos;ll be speaking for this clinical session.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-3 pt-2">
+                        <Button
+                            type="button"
+                            variant={selectedLanguage === "en" ? "default" : "outline"}
+                            className="justify-between"
+                            onClick={() => {
+                                setSelectedLanguage("en");
+                                setHasConfirmedLanguage(true);
+                                setIsLanguageDialogOpen(false);
+                                if (pendingStartAfterLanguageSelection) {
+                                    setStartSignal((prev) => prev + 1);
+                                }
+                            }}
+                        >
+                            <span>English</span>
+                            {selectedLanguage === "en" && <span className="text-xs uppercase tracking-wide">Selected</span>}
+                        </Button>
+                        <Button
+                            type="button"
+                            variant={selectedLanguage === "ur" ? "default" : "outline"}
+                            className="justify-between"
+                            onClick={() => {
+                                setSelectedLanguage("ur");
+                                setHasConfirmedLanguage(true);
+                                setIsLanguageDialogOpen(false);
+                                if (pendingStartAfterLanguageSelection) {
+                                    setStartSignal((prev) => prev + 1);
+                                }
+                            }}
+                        >
+                            <span>Urdu</span>
+                            {selectedLanguage === "ur" && <span className="text-xs uppercase tracking-wide">Selected</span>}
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isFinalizeDialogOpen} onOpenChange={setIsFinalizeDialogOpen}>
+                <DialogContent className="sm:max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle>Finalize Clinical Session</DialogTitle>
+                        <DialogDescription>
+                            Complete all required tasks before ending this visit.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs">
+                        <span className="text-stone-600">
+                            {isSessionFinalized
+                                ? "This session has been finalized."
+                                : "Complete each checkpoint to finalize this session."}
+                        </span>
+                        {!isSessionFinalized && (
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 rounded-full border border-stone-300 bg-white p-0 text-stone-700 hover:bg-stone-100 hover:text-stone-900"
+                                onClick={() => {
+                                    void loadFinalizeChecklist();
+                                }}
+                                disabled={isFinalizeChecklistLoading || isFinalizingSession}
+                                title="Refresh checklist"
+                                aria-label="Refresh checklist"
+                            >
+                                {isFinalizeChecklistLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                            </Button>
+                        )}
+                    </div>
+
+                    {isFinalizeChecklistLoading ? (
+                        <div className="flex items-center justify-center gap-2 rounded-lg border bg-muted/20 py-8 text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading checklist...
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            <div className="overflow-x-auto rounded-lg border bg-muted/20 p-3">
+                                <div className="inline-flex min-w-max items-center">
+                                    {finalizeTrackingTasks.map((task, index) => (
+                                        <React.Fragment key={task.key}>
+                                            {index > 0 && (
+                                                <div className={`mx-1 h-px w-6 ${task.complete ? "bg-emerald-300" : "bg-red-300"}`} />
+                                            )}
+
+                                            <button
+                                                type="button"
+                                                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${task.complete
+                                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                                                    : "border-red-200 bg-red-50 text-red-800 hover:bg-red-100"}`}
+                                                disabled={isSessionFinalized}
+                                                onClick={() => {
+                                                    if (!isSessionFinalized) {
+                                                        handleFinalizeTaskAction(task.key);
+                                                    }
+                                                }}
+                                                title={task.description}
+                                                aria-label={`${task.label}: ${task.complete ? "complete" : "incomplete"}`}
+                                            >
+                                                <span className={`h-2.5 w-2.5 rounded-full ${task.complete ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
+                                                {task.label}
+                                            </button>
+                                        </React.Fragment>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {finalizeTasks.map((task) => (
+                                <div key={task.key} className="rounded-lg border p-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-semibold text-foreground">{task.label}</p>
+                                            <p className="mt-1 text-xs text-muted-foreground">{task.description}</p>
+                                        </div>
+                                        <Badge
+                                            className={task.complete
+                                                ? "shrink-0 border-emerald-300 bg-emerald-100 text-emerald-900"
+                                                : "shrink-0 border-red-300 bg-red-100 text-red-900"}
+                                            variant="outline"
+                                        >
+                                            <span className={`mr-1 inline-block h-2.5 w-2.5 rounded-full ${task.complete ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
+                                            {task.complete ? "Complete" : "Pending"}
+                                        </Badge>
+                                    </div>
+                                </div>
+                            ))}
+
+                            {!canFinalizeSession && (
+                                <div className="rounded-lg border border-amber-300 bg-amber-50/80 p-3 text-xs text-amber-900">
+                                    Complete remaining tasks to finalize this session.
+                                </div>
+                            )}
+
+                            {canFinalizeSession && (
+                                <div className="rounded-lg border border-emerald-300 bg-emerald-50/80 p-3 text-xs text-emerald-900">
+                                    All requirements are complete. You can now finalize this clinical session.
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <DialogFooter>
+                        <Button type="button" variant="ghost" onClick={() => setIsFinalizeDialogOpen(false)}>
+                            Close
+                        </Button>
+                        {finalizationStep === 3 && !isSessionFinalized && (
+                            <Button
+                                type="button"
+                                className="border border-black bg-black text-white hover:bg-stone-800 hover:text-white"
+                                onClick={handleSaveTranscription}
+                                disabled={isSavingToDatabase}
+                            >
+                                {isSavingToDatabase ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        Saving...
+                                    </>
+                                ) : (
+                                    "Save Transcript & Facts"
+                                )}
+                            </Button>
+                        )}
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isSpeakerReviewOpen} onOpenChange={setIsSpeakerReviewOpen}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Review Speakers</DialogTitle>
+                        <DialogDescription>
+                            Assign speaker names before finalization. These labels will be applied globally to transcript history.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="max-h-80 space-y-3 overflow-y-auto">
+                        {uniqueSpeakerIds.length === 0 ? (
+                            <div className="rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground">
+                                No speakers detected yet.
+                            </div>
+                        ) : (
+                            uniqueSpeakerIds.map((speakerId) => (
+                                <div key={speakerId} className="grid grid-cols-[120px_1fr] items-center gap-3">
+                                    <div className="text-xs font-medium text-muted-foreground">{speakerId}</div>
+                                    <Input
+                                        value={speakerDraftMapping[speakerId] ?? speakerMapping[speakerId] ?? speakerId}
+                                        onChange={(event) =>
+                                            setSpeakerDraftMapping((prev) => ({
+                                                ...prev,
+                                                [speakerId]: event.target.value,
+                                            }))
+                                        }
+                                        placeholder={speakerId}
+                                    />
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button type="button" variant="ghost" onClick={() => setIsSpeakerReviewOpen(false)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            className="border border-black bg-black text-white hover:bg-stone-800 hover:text-white"
+                            onClick={() => {
+                                void handleSaveSpeakerReview();
+                            }}
+                            disabled={isGeneratingSoap || uniqueSpeakerIds.length === 0}
+                        >
+                            {isGeneratingSoap ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Saving
+                                </>
+                            ) : (
+                                "Save and Continue"
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={isLinkPatientDialogOpen} onOpenChange={setIsLinkPatientDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Link patient to this session</DialogTitle>
+                        <DialogDescription>Choose a patient to attach to this appointment.</DialogDescription>
+                    </DialogHeader>
+
+                    <div className="max-h-72 overflow-y-auto space-y-2">
+                        {isLoadingPatients ? (
+                            <div className="py-8 flex items-center justify-center text-sm text-muted-foreground">
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading patients...
+                            </div>
+                        ) : linkablePatients.length === 0 ? (
+                            <div className="py-8 text-center text-sm text-muted-foreground">No patients found for this doctor yet.</div>
+                        ) : (
+                            linkablePatients.map((patient) => (
+                                <button
+                                    key={patient.id}
+                                    type="button"
+                                    className="w-full flex items-center justify-between p-2.5 rounded-lg border hover:bg-muted/40 transition-colors"
+                                    onClick={() => handleLinkPatient(patient.id)}
+                                    disabled={isLinkingPatient}
+                                >
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                        <Avatar className="h-8 w-8 border">
+                                            <AvatarImage src={patient.imageUrl || undefined} alt={patient.name} />
+                                            <AvatarFallback>{patient.initials}</AvatarFallback>
+                                        </Avatar>
+                                        <span className="text-sm font-medium truncate">{patient.name}</span>
+                                    </div>
+                                    <Link2 className="h-4 w-4 text-muted-foreground" />
+                                </button>
+                            ))
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Are you sure you want to delete this session?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            This will permanently delete all transcripts, notes and documents associated with this session.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            onClick={handleDeleteAppointment}
+                            disabled={isDeletingAppointment}
+                        >
+                            Delete session
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+        </div>
+    );
+}

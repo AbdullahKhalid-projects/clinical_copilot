@@ -1,0 +1,8 @@
+Need ngrok for local clerk to prisma connection - couldnt figure out another way:
+Need this for local connection to clerk webhooks like user actions
+Run this in a terminal
+ngrok http --url=osiered-misael-transurethral.ngrok-free.dev 3000
+
+
+To see database state:
+npx prisma studio
