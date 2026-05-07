@@ -321,7 +321,6 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         sessionStopped,
         readyForLabelEdits,
         waitForServerReady,
-        waitForFidelityResult,
         setSpeakerLabel,
         finalizeSpeakerLabels,
     } = useClinicalWebSocket({
@@ -909,48 +908,45 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                 setUploadProgress(100);
                 setFinalizationStep(2);
 
-                // Fidelity is computed on the WebSocket worker (same Modal container as transcription).
-                // HTTP POST often hits a different concurrent worker and would miss in-memory `sessions`.
-                const wsFidelity = await waitForFidelityResult(120000);
-                if (wsFidelity) {
-                    console.log("[clinical] Fidelity from WebSocket (same Modal worker):", wsFidelity);
-                    if (wsFidelity.fidelity_source === "gemini" && typeof wsFidelity.fidelity_score === "number") {
-                        setFidelityScore(wsFidelity.fidelity_score);
-                    } else {
-                        setFidelityScore(null);
-                    }
-                    if (wsFidelity.fidelity_reasoning) {
-                        setFidelityReasoning(wsFidelity.fidelity_reasoning);
-                    }
-                    setFidelitySource(wsFidelity.fidelity_source || null);
-                    if (wsFidelity.gemini_raw) {
-                        console.log("[clinical] Gemini raw text:", wsFidelity.gemini_raw);
-                    }
-                }
+                // Fidelity check is now done via Next.js API (independent of Modal)
+                // This ensures it works on Vercel without requiring Modal redeployment
+                try {
+                    console.log("[clinical] Starting fidelity check via Next.js API...");
+                    const fidelityResponse = await fetch("/api/fidelity-check", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            audioUrl: uploadedRecordingUrl,
+                            transcriptSegments: transcript,
+                            speakerLabels: speakerRoles,
+                        }),
+                    });
 
-                if ((!wsFidelity || wsFidelity.fidelity_source !== "gemini") && sessionId) {
-                    try {
-                        const response = await fetch(`${pythonBackendUrl}/api/end-session/${sessionId}`, {
-                            method: "POST",
-                        });
-                        if (response.ok) {
-                            const data = await response.json();
-                            console.log("[clinical] Fidelity API fallback response:", data);
-                            if (data.fidelity_source === "gemini" && typeof data.fidelity_score === "number") {
-                                setFidelityScore(data.fidelity_score);
-                                setFidelityReasoning(typeof data.fidelity_reasoning === "string" ? data.fidelity_reasoning : null);
-                                setFidelitySource(data.fidelity_source);
-                                if (typeof data.gemini_raw === "string" && data.gemini_raw) {
-                                    console.log("[clinical] Gemini raw (HTTP):", data.gemini_raw);
-                                }
-                            }
+                    if (fidelityResponse.ok) {
+                        const fidelityData = await fidelityResponse.json();
+                        console.log("[clinical] Fidelity check response:", fidelityData);
+
+                        if (fidelityData.fidelity_source === "gemini" && typeof fidelityData.fidelity_score === "number") {
+                            setFidelityScore(fidelityData.fidelity_score);
                         } else {
-                            const errBody = await response.json().catch(() => ({}));
-                            console.warn("[clinical] Fidelity API fallback not available:", response.status, errBody);
+                            setFidelityScore(null);
                         }
-                    } catch (error) {
-                        console.error("[clinical] Fidelity API fallback failed", error);
+                        if (fidelityData.fidelity_reasoning) {
+                            setFidelityReasoning(fidelityData.fidelity_reasoning);
+                        }
+                        setFidelitySource(fidelityData.fidelity_source || null);
+                        if (fidelityData.gemini_raw) {
+                            console.log("[clinical] Gemini raw text:", fidelityData.gemini_raw);
+                        }
+                    } else {
+                        console.warn("[clinical] Fidelity check failed:", fidelityResponse.status);
+                        setFidelityScore(null);
+                        setFidelitySource("error");
                     }
+                } catch (error) {
+                    console.error("[clinical] Fidelity check error:", error);
+                    setFidelityScore(null);
+                    setFidelitySource("error");
                 }
 
                 // Move to step 3: speaker label editing
