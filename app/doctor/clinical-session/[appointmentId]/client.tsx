@@ -319,8 +319,11 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         sendAudioChunk,
         stopSession,
         sessionStopped,
+        readyForLabelEdits,
         waitForServerReady,
         waitForFidelityResult,
+        setSpeakerLabel,
+        finalizeSpeakerLabels,
     } = useClinicalWebSocket({
         backendUrl: pythonBackendUrl,
         language: selectedLanguage,
@@ -2551,6 +2554,14 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                         size="sm"
                                                         className="mt-3 w-full h-8"
                                                         onClick={() => {
+                                                            // Send all speaker label changes to the backend
+                                                            Object.entries(finalSpeakerDraftMapping).forEach(([speakerId, label]) => {
+                                                                setSpeakerLabel(speakerId, label);
+                                                            });
+
+                                                            // Signal backend that speaker labels are finalized
+                                                            finalizeSpeakerLabels();
+
                                                             // Apply the speaker label changes to the main mapping
                                                             setSpeakerMapping((prev) => ({
                                                                 ...prev,

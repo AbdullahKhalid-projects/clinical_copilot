@@ -77,6 +77,7 @@ export const useClinicalWebSocket = ({
   const [speakerRoles, setSpeakerRoles] = useState<Record<string, string>>({});
   const [sessionStopped, setSessionStopped] = useState(false);
   const [serverReady, setServerReady] = useState(false);
+  const [readyForLabelEdits, setReadyForLabelEdits] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -308,10 +309,16 @@ export const useClinicalWebSocket = ({
         console.log("⏹️ Session Stopped");
         setSessionStopped(true);
         setServerReady(false);
+        setReadyForLabelEdits(false);
         resolveServerReadyWaiters(false);
         if (fidelityWaitersRef.current.length > 0) {
           resolveFidelityWaiters(lastFidelityRef.current);
         }
+        break;
+
+      case "ready_for_speaker_label_edits":
+        console.log("🏷️ Backend ready for speaker label edits");
+        setReadyForLabelEdits(true);
         break;
 
       default:
@@ -411,6 +418,47 @@ export const useClinicalWebSocket = ({
     });
   }, []);
 
+  // Send speaker label update (used during finalization dialog)
+  const setSpeakerLabel = useCallback((speaker: string, label: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.warn("⚠️ Cannot send speaker label: WebSocket not open");
+      return;
+    }
+
+    try {
+      wsRef.current.send(
+        JSON.stringify({
+          action: "set_speaker_label",
+          speaker,
+          label,
+        })
+      );
+      console.log(`✅ Speaker label sent: ${speaker} → "${label}"`);
+    } catch (e) {
+      console.error("❌ Error sending speaker label:", e);
+    }
+  }, []);
+
+  // Signal backend that speaker label edits are complete
+  const finalizeSpeakerLabels = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.warn("⚠️ Cannot finalize labels: WebSocket not open");
+      return;
+    }
+
+    try {
+      shouldReconnectRef.current = false;
+      wsRef.current.send(
+        JSON.stringify({
+          action: "finalize_session",
+        })
+      );
+      console.log("✅ Session finalization signal sent to backend");
+    } catch (e) {
+      console.error("❌ Error sending finalization signal:", e);
+    }
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -433,7 +481,10 @@ export const useClinicalWebSocket = ({
     stopSession,
     sessionStopped,
     serverReady,
+    readyForLabelEdits,
     waitForServerReady,
     waitForFidelityResult,
+    setSpeakerLabel,
+    finalizeSpeakerLabels,
   };
 };
