@@ -360,6 +360,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [isGeneratingSoap, setIsGeneratingSoap] = React.useState(false);
     const [isRecorderPaused, setIsRecorderPaused] = React.useState(false);
     const liveTranscriptionCancelledRef = React.useRef(false);
+    const transcriptRef = React.useRef<TranscriptSegment[]>([]);
     const [noteTemplates, setNoteTemplates] = React.useState<Array<{ id: string; name: string; description: string; template: SoapTemplate }>>([]);
     const [selectedTemplateId, setSelectedTemplateId] = React.useState("");
     const [isLoadingNoteTemplates, setIsLoadingNoteTemplates] = React.useState(false);
@@ -797,6 +798,12 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         });
     }, [displayedTranscript, speakerRoles]);
 
+    // Keep a ref copy of transcript segments so uploadAudioFile always has latest data
+    React.useEffect(() => {
+        transcriptRef.current = transcript;
+        console.log("[clinical] transcriptRef updated:", transcript.length, "segments");
+    }, [transcript]);
+
     React.useEffect(() => {
         return () => {
             cleanupLiveTranscription();
@@ -910,21 +917,34 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
                 // Fidelity check is now done via Next.js API (independent of Modal)
                 // This ensures it works on Vercel without requiring Modal redeployment
+                const segmentsToSend = transcriptRef.current;
+                console.log("[clinical] Fidelity check - segments from ref:", segmentsToSend.length, "transcript state:", transcript.length);
+
                 try {
-                    console.log("[clinical] Starting fidelity check via Next.js API...");
+                    const payload = {
+                        audioUrl: uploadedRecordingUrl,
+                        transcriptSegments: segmentsToSend,
+                        speakerLabels: speakerRoles,
+                    };
+                    console.log("[clinical] Fidelity check payload:", {
+                        audioUrl: payload.audioUrl.substring(0, 60) + "...",
+                        segmentCount: payload.transcriptSegments.length,
+                        firstSegmentText: payload.transcriptSegments[0]?.text?.substring(0, 50) || "none",
+                        speakerLabelCount: Object.keys(payload.speakerLabels).length,
+                    });
+
                     const fidelityResponse = await fetch("/api/fidelity-check", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            audioUrl: uploadedRecordingUrl,
-                            transcriptSegments: transcript,
-                            speakerLabels: speakerRoles,
-                        }),
+                        body: JSON.stringify(payload),
                     });
+
+                    console.log("[clinical] Fidelity check HTTP status:", fidelityResponse.status);
 
                     if (fidelityResponse.ok) {
                         const fidelityData = await fidelityResponse.json();
-                        console.log("[clinical] Fidelity check response:", fidelityData);
+                        console.log("[clinical] Fidelity check FULL response:", fidelityData);
+                        console.log("[clinical] Gemini raw:", fidelityData.gemini_raw || "(no raw output)");
 
                         if (fidelityData.fidelity_source === "gemini" && typeof fidelityData.fidelity_score === "number") {
                             setFidelityScore(fidelityData.fidelity_score);
@@ -935,11 +955,9 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                             setFidelityReasoning(fidelityData.fidelity_reasoning);
                         }
                         setFidelitySource(fidelityData.fidelity_source || null);
-                        if (fidelityData.gemini_raw) {
-                            console.log("[clinical] Gemini raw text:", fidelityData.gemini_raw);
-                        }
                     } else {
-                        console.warn("[clinical] Fidelity check failed:", fidelityResponse.status);
+                        const errorText = await fidelityResponse.text().catch(() => "Could not read error body");
+                        console.warn("[clinical] Fidelity check failed:", fidelityResponse.status, errorText);
                         setFidelityScore(null);
                         setFidelitySource("error");
                     }
