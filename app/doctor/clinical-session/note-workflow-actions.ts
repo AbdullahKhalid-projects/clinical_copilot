@@ -23,7 +23,10 @@ import {
 const db = prisma as any;
 
 function resolveNoteBackendUrl() {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const configuredUrl =
+    process.env.PYTHON_BACKEND_URL?.trim() || process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL?.trim();
+
+  const baseUrl = configuredUrl && configuredUrl.length > 0 ? configuredUrl : "http://127.0.0.1:8000";
   return baseUrl.replace(/\/+$/, "");
 }
 
@@ -160,33 +163,19 @@ export async function getActiveNoteTemplatesForSession(): Promise<ActiveNoteTemp
     return { success: false, error: "User not found" };
   }
 
-  const personalTemplates = await db.noteTemplate.findMany({
+  const templates = await db.noteTemplate.findMany({
     where: {
       source: "PERSONAL",
       userId: dbUser.id,
+      isActive: true,
     },
     include: {
       fields: {
         orderBy: { fieldOrder: "asc" },
       },
     },
-    orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
   });
-
-  const templates =
-    personalTemplates.length > 0
-      ? personalTemplates
-      : await db.noteTemplate.findMany({
-          where: {
-            source: "LIBRARY",
-          },
-          include: {
-            fields: {
-              orderBy: { fieldOrder: "asc" },
-            },
-          },
-          orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
-        });
 
   return {
     success: true,
@@ -203,12 +192,6 @@ export async function getActiveNoteTemplatesForSession(): Promise<ActiveNoteTemp
 export async function generateAppointmentNoteFromTemplate(
   appointmentId: string,
   templateId: string,
-  overrides?: {
-    transcriptSegments?: NormalizedTranscriptSegment[];
-    transcriptText?: string;
-    facts?: Record<string, unknown>;
-    speakerMapping?: Record<string, string>;
-  },
 ): Promise<GenerateTemplateNoteResult> {
   const user = await currentUser();
   if (!user) {
@@ -260,15 +243,9 @@ export async function generateAppointmentNoteFromTemplate(
     db.noteTemplate.findFirst({
       where: {
         id: templateId,
-        OR: [
-          {
-            source: "PERSONAL",
-            userId: dbUser.id,
-          },
-          {
-            source: "LIBRARY",
-          },
-        ],
+        source: "PERSONAL",
+        userId: dbUser.id,
+        isActive: true,
       },
       include: {
         fields: {
@@ -283,17 +260,11 @@ export async function generateAppointmentNoteFromTemplate(
   }
 
   if (!templateRecord) {
-    return { success: false, error: "Selected template is unavailable. Choose a valid personal or library template." };
+    return { success: false, error: "Selected template is unavailable. Use an active personal template." };
   }
 
-  const transcriptSegments =
-    overrides?.transcriptSegments && overrides.transcriptSegments.length > 0
-      ? overrides.transcriptSegments
-      : normalizeTranscriptSegments(appointment.transcript);
-  const transcriptText =
-    typeof overrides?.transcriptText === "string" && overrides.transcriptText.trim().length > 0
-      ? overrides.transcriptText
-      : buildTranscriptText(transcriptSegments);
+  const transcriptSegments = normalizeTranscriptSegments(appointment.transcript);
+  const transcriptText = buildTranscriptText(transcriptSegments);
 
   if (!transcriptText.trim()) {
     return { success: false, error: "No transcript found. Upload or record transcription before generating a note." };
@@ -336,8 +307,6 @@ export async function generateAppointmentNoteFromTemplate(
       patient_date_of_birth: patientMetadata.patient_date_of_birth,
       patient_id: patientMetadata.patient_id,
       visit_date: patientMetadata.visit_date,
-      live_facts: overrides?.facts ?? {},
-      speaker_mapping: overrides?.speakerMapping ?? {},
     },
   };
 
@@ -484,15 +453,9 @@ export async function saveAppointmentTemplateNoteDraft(
     db.noteTemplate.findFirst({
       where: {
         id: templateId,
-        OR: [
-          {
-            source: "PERSONAL",
-            userId: dbUser.id,
-          },
-          {
-            source: "LIBRARY",
-          },
-        ],
+        source: "PERSONAL",
+        userId: dbUser.id,
+        isActive: true,
       },
       include: {
         fields: {
@@ -507,7 +470,7 @@ export async function saveAppointmentTemplateNoteDraft(
   }
 
   if (!templateRecord) {
-    return { success: false, error: "Selected template is unavailable. Choose a valid personal or library template." };
+    return { success: false, error: "Selected template is unavailable. Use an active personal template." };
   }
 
   const template = mapRecordToSoapTemplate(templateRecord);

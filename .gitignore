@@ -3,19 +3,9 @@
 # dependencies
 /node_modules
 
-python/
-venv/
-__pycache__/
-*.pyc
-.env
-
-.env.local
-..env.local
-
 # next.js
 /.next/
 /out/
-/python
 
 # production
 /build
@@ -28,11 +18,7 @@ yarn-error.log*
 
 # env files
 .env*
-/python/venv/
-venv/
-.venv/
-__pycache__/
-*.py[cod]
+
 # vercel
 .vercel
 
@@ -44,4 +30,5 @@ next-env.d.ts
 
 # prisma generated client output
 /app/generated/prisma/
-/generated/prisma/python/venv/
+/generated/prisma/
+

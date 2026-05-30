@@ -18,7 +18,10 @@ import {
 } from "../templates/types";
 
 function resolveNoteBridgeBackendUrl() {
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const configuredUrl =
+    process.env.PYTHON_BACKEND_URL?.trim() || process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL?.trim();
+
+  const baseUrl = configuredUrl && configuredUrl.length > 0 ? configuredUrl : "http://127.0.0.1:8000";
   return baseUrl.replace(/\/+$/, "");
 }
 
@@ -263,21 +266,6 @@ export async function bridgeActiveTemplateToPython(
   if (!activeTemplateRecord) {
     activeTemplateRecord = await db.noteTemplate.findFirst({
       where: {
-        source: "PERSONAL",
-        userId: dbUser.id,
-      },
-      include: {
-        fields: {
-          orderBy: { fieldOrder: "asc" },
-        },
-      },
-      orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }],
-    });
-  }
-
-  if (!activeTemplateRecord) {
-    activeTemplateRecord = await db.noteTemplate.findFirst({
-      where: {
         source: "LIBRARY",
         isActive: true,
       },
@@ -287,20 +275,6 @@ export async function bridgeActiveTemplateToPython(
         },
       },
       orderBy: { updatedAt: "desc" },
-    });
-  }
-
-  if (!activeTemplateRecord) {
-    activeTemplateRecord = await db.noteTemplate.findFirst({
-      where: {
-        source: "LIBRARY",
-      },
-      include: {
-        fields: {
-          orderBy: { fieldOrder: "asc" },
-        },
-      },
-      orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }],
     });
   }
 

@@ -159,8 +159,6 @@ model Document {
   title           String
   content         String       @db.Text
   pdfUrl          String?
-  hospitalName    String?
-  reportDate      DateTime?
   type            DocumentType @default(RAG)
   ragSubtype      RagSubtype?
   patientDataType PatientDataType?
@@ -281,7 +279,6 @@ model DoctorProfile {
   
   appointments   Appointment[]
   prescriptions  Prescription[]
-  voiceEmbedding VoiceEmbedding?
 }
 
 // Patient Schema
@@ -397,28 +394,7 @@ model Appointment {
   
   patientId String?
   patient   PatientProfile? @relation(fields: [patientId], references: [id], onDelete: SetNull)
-  facts     Fact[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-}
-
-model VoiceEmbedding {
-  id            String        @id @default(uuid())
-  doctorId      String        @unique
-  doctor        DoctorProfile @relation(fields: [doctorId], references: [id], onDelete: Cascade)
-  embeddingData Json
-
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-}
-
-model Fact {
-  id            String      @id @default(uuid())
-  appointmentId String
-  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
-  extractedData Json
-
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
 }

@@ -55,8 +55,9 @@ export const SoapAvsDialog = React.forwardRef<HTMLDivElement, SoapAvsDialogProps
 
       try {
         setLoading(true);
-        const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const response = await fetch(`${baseUrl}/api/soap/${sessionId}`);
+        const response = await fetch(
+          `http://localhost:8000/api/soap/${sessionId}`
+        );
         if (!response.ok) throw new Error("Failed to fetch SOAP data");
 
         const data: SOAPData = await response.json();

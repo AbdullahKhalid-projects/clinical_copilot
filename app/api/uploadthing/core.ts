@@ -30,48 +30,40 @@ export const ourFileRouter = {
       console.log("Audio Upload complete for userId:", metadata.userId);
       const recordingUrl = file.ufsUrl || file.appUrl || file.url;
 
-      try {
-        const appointment = await prisma.appointment.findFirst({
-          where: {
-            id: metadata.appointmentId,
-            doctor: {
-              is: {
-                user: {
-                  clerkId: metadata.userId,
-                },
+      const appointment = await prisma.appointment.findFirst({
+        where: {
+          id: metadata.appointmentId,
+          doctor: {
+            is: {
+              user: {
+                clerkId: metadata.userId,
               },
             },
           },
-          select: {
-            id: true,
-            patientId: true,
-          },
-        });
+        },
+        select: {
+          id: true,
+          patientId: true,
+        },
+      });
 
-        if (!appointment) {
-          console.error("[uploadthing] Appointment not found:", metadata.appointmentId, "userId:", metadata.userId);
-          // Still return the URL so frontend can proceed with fidelity check
-          return { appointmentId: metadata.appointmentId, recordingUrl };
-        }
-
-        await prisma.appointment.update({
-          where: { id: appointment.id },
-          data: {
-            recordingUrl,
-            status: appointment.patientId ? "IN_PROGRESS" : "UNLINKED",
-            aiStatus: "UPLOADED",
-          },
-        });
-
-        return {
-          appointmentId: appointment.id,
-          recordingUrl,
-        };
-      } catch (error) {
-        console.error("[uploadthing] Error in onUploadComplete:", error);
-        // Return the URL anyway so frontend can continue with fidelity check
-        return { appointmentId: metadata.appointmentId, recordingUrl };
+      if (!appointment) {
+        throw new Error("Appointment not found or not accessible for this doctor");
       }
+
+      await prisma.appointment.update({
+        where: { id: appointment.id },
+        data: {
+          recordingUrl,
+          status: appointment.patientId ? "IN_PROGRESS" : "UNLINKED",
+          aiStatus: "UPLOADED",
+        },
+      });
+
+      return {
+        appointmentId: appointment.id,
+        recordingUrl,
+      };
     }),
 
   // Endpoint for PDF attachments (e.g. SOAP notes if generated as PDF)

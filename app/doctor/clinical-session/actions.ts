@@ -217,16 +217,6 @@ export async function getClinicalSessionData(appointmentId: string) {
       doctorId: doctor.id,
     },
     include: {
-      doctor: {
-        include: {
-          voiceEmbedding: {
-            select: {
-              embeddingData: true,
-              updatedAt: true,
-            },
-          },
-        },
-      },
       patient: {
         include: {
           user: true, // to get name
@@ -250,62 +240,6 @@ export async function getClinicalSessionData(appointmentId: string) {
   }
 
   return { ...appointment, patientImageUrl };
-}
-
-export async function saveSessionFinalArtifacts(
-  appointmentId: string,
-  payload: {
-    extractedFacts?: Record<string, unknown>;
-    finalTranscript?: unknown;
-  },
-) {
-  const doctor = await getCurrentDoctor();
-  if (!doctor) {
-    return { success: false, error: "Doctor profile not found" };
-  }
-
-  const appointment = await prisma.appointment.findFirst({
-    where: {
-      id: appointmentId,
-      doctorId: doctor.id,
-    },
-    select: { id: true },
-  });
-
-  if (!appointment) {
-    return { success: false, error: "Appointment not found" };
-  }
-
-  const extractedFacts = payload?.extractedFacts ?? {};
-  const hasFacts =
-    extractedFacts &&
-    typeof extractedFacts === "object" &&
-    !Array.isArray(extractedFacts) &&
-    Object.keys(extractedFacts).length > 0;
-  const hasFinalTranscript = Array.isArray(payload?.finalTranscript) && payload.finalTranscript.length > 0;
-
-  await prisma.$transaction(async (tx) => {
-    if (hasFinalTranscript) {
-      await tx.appointment.update({
-        where: { id: appointment.id },
-        data: {
-          transcript: payload.finalTranscript as Prisma.InputJsonValue,
-        },
-      });
-    }
-
-    if (hasFacts) {
-      await tx.fact.create({
-        data: {
-          appointmentId: appointment.id,
-          extractedData: extractedFacts as Prisma.InputJsonValue,
-        },
-      });
-    }
-  });
-
-  revalidatePath(`/doctor/clinical-session/${appointment.id}`);
-  return { success: true };
 }
 
 export type PatientMetricCatalogResult = {
