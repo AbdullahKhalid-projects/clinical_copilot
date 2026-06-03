@@ -8,7 +8,6 @@ import { renderNoteDocumentPdfBuffer } from "@/lib/note-document-pdf";
 import { markSoapNoteAsFinalized } from "@/lib/visit-summary";
 import { mapRecordToSoapTemplate } from "@/lib/template-utils";
 import { currentUser, clerkClient } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 function isLikelyClerkUserId(value: string | null | undefined): value is string {
@@ -19,7 +18,7 @@ function isLikelyClerkUserId(value: string | null | undefined): value is string 
 async function getCurrentDoctor() {
   const user = await currentUser();
   if (!user) {
-    redirect("/");
+    return null;
   }
 
   const doctor = await prisma.doctorProfile.findFirst({
@@ -1052,4 +1051,69 @@ export async function getLastSoapNote(appointmentId: string): Promise<{
     appointmentDate: lastAppointment.date,
     soapNote: rawSoapNote as Record<string, unknown>,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline: save transcript + extracted facts produced by Whisper/pyannote pipeline
+// ---------------------------------------------------------------------------
+
+export async function saveSessionFinalArtifacts(
+  appointmentId: string,
+  payload: {
+    extractedFacts?: Record<string, unknown>;
+    finalTranscript?: unknown;
+  },
+): Promise<{ success: boolean; error?: string }> {
+  const user = await currentUser();
+  if (!user) return { success: false, error: "Unauthorized" };
+
+  const doctor = await prisma.doctorProfile.findFirst({
+    where: { user: { clerkId: user.id } },
+    select: { id: true },
+  });
+  if (!doctor) return { success: false, error: "Doctor profile not found" };
+
+  const appointment = await prisma.appointment.findFirst({
+    where: { id: appointmentId, doctorId: doctor.id },
+    select: { id: true },
+  });
+  if (!appointment) return { success: false, error: "Appointment not found" };
+
+  const extractedFacts = payload?.extractedFacts ?? {};
+  const hasFacts =
+    extractedFacts &&
+    typeof extractedFacts === "object" &&
+    !Array.isArray(extractedFacts) &&
+    Object.keys(extractedFacts).length > 0;
+  const hasFinalTranscript =
+    Array.isArray(payload?.finalTranscript) && payload.finalTranscript.length > 0;
+
+  // Save transcript first (independent — must not be blocked by facts failure)
+  if (hasFinalTranscript) {
+    await prisma.appointment.update({
+      where: { id: appointment.id },
+      data: {
+        transcript: payload.finalTranscript as Prisma.InputJsonValue,
+        aiStatus: "COMPLETED",
+      },
+    });
+  }
+
+  // Save extracted facts separately — the Fact model may not exist in the DB yet,
+  // so this must never block the transcript save.
+  if (hasFacts) {
+    try {
+      await (prisma as any).fact.create({
+        data: {
+          appointmentId: appointment.id,
+          extractedData: extractedFacts as Prisma.InputJsonValue,
+        },
+      });
+    } catch (factErr) {
+      console.error("Failed to persist extracted facts (non-blocking):", factErr);
+    }
+  }
+
+  revalidatePath(`/doctor/clinical-session/${appointment.id}`);
+  return { success: true };
 }

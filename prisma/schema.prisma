@@ -398,3 +398,14 @@ model Appointment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// Extracted clinical facts for an appointment
+model Fact {
+  id             String   @id @default(uuid())
+  appointmentId  String
+  extractedData  Json
+
+  createdAt      DateTime @default(now())
+
+  @@index([appointmentId])
+}

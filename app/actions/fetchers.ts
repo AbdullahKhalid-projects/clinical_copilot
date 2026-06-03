@@ -4,7 +4,6 @@ import { currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { buildVisitSummaryExcerpt, extractNoteTextFromSoapNote, getSoapNoteFinalizedAt } from "@/lib/visit-summary";
-import { redirect } from "next/navigation";
 
 export type PatientVisitSummaryItem = {
   id: string;
@@ -21,7 +20,7 @@ export async function getPatientDashboardData() {
   const user = await currentUser();
 
   if (!user) {
-    redirect("/");
+    return null;
   }
 
   const dbUser = await prisma.user.findUnique({
@@ -81,7 +80,7 @@ export async function getPatientMedications() {
   const user = await currentUser();
 
   if (!user) {
-    redirect("/");
+    return [];
   }
 
   const dbUser = await prisma.user.findUnique({
@@ -120,7 +119,7 @@ export async function getNotesAndReminders() {
   const user = await currentUser();
 
   if (!user) {
-    redirect("/");
+    return { notes: [], reminders: [] };
   }
 
   const dbUser = await prisma.user.findUnique({
@@ -156,7 +155,7 @@ export async function getPatientReports() {
   const user = await currentUser();
 
   if (!user) {
-    redirect("/");
+    return [];
   }
 
   const dbUser = await prisma.user.findUnique({
@@ -201,7 +200,7 @@ export async function getPatientVisitSummaries(): Promise<PatientVisitSummaryIte
   const user = await currentUser();
 
   if (!user) {
-    redirect("/");
+    return [];
   }
 
   const dbUser = await prisma.user.findUnique({
@@ -280,7 +279,7 @@ export async function deleteVisitSummary(appointmentId: string): Promise<{ succe
   const user = await currentUser();
 
   if (!user) {
-    return { success: false, error: "Unauthorized" };
+    return null;
   }
 
   const dbUser = await prisma.user.findUnique({
@@ -318,11 +317,99 @@ export async function deleteVisitSummary(appointmentId: string): Promise<{ succe
   }
 }
 
+export type PatientTranscriptItem = {
+  id: string;
+  appointmentDate: Date;
+  doctorName: string;
+  title: string;
+  duration: string;
+  segmentCount: number;
+  viewUrl: string;
+  downloadUrl: string;
+};
+
+export async function getPatientTranscripts(): Promise<PatientTranscriptItem[]> {
+  const user = await currentUser();
+  if (!user) {
+    return [];
+  }
+
+  const dbUser = await prisma.user.findUnique({
+    where: { clerkId: user.id },
+    include: {
+      patientProfile: {
+        select: { id: true },
+      },
+    },
+  });
+
+  if (!dbUser?.patientProfile) {
+    return [];
+  }
+
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      patientId: dbUser.patientProfile.id,
+      status: "COMPLETED",
+      transcript: { not: Prisma.AnyNull },
+    },
+    select: {
+      id: true,
+      date: true,
+      reason: true,
+      transcript: true,
+      doctor: {
+        select: {
+          user: { select: { name: true } },
+          specialization: true,
+        },
+      },
+    },
+    orderBy: { date: "desc" },
+  });
+
+  const items = appointments
+    .map((appointment) => {
+      const segments = appointment.transcript as Array<{ text?: string; start?: number; end?: number }> | null;
+      if (!segments || !Array.isArray(segments) || segments.length === 0) {
+        return null;
+      }
+
+      const doctorName = appointment.doctor?.user?.name
+        ? `Dr. ${appointment.doctor.user.name}`
+        : appointment.doctor?.specialization
+          ? `Dr. ${appointment.doctor.specialization}`
+          : "Care Team";
+
+      // Compute approximate duration from segment timestamps
+      let durationMinutes = 0;
+      const validSegments = segments.filter((s) => typeof s.start === "number" && typeof s.end === "number");
+      if (validSegments.length > 0) {
+        const totalSeconds = validSegments[validSegments.length - 1].end! - validSegments[0].start!;
+        durationMinutes = Math.max(1, Math.round(totalSeconds / 60));
+      }
+
+      return {
+        id: appointment.id,
+        appointmentDate: appointment.date,
+        doctorName,
+        title: appointment.reason?.trim() || "Clinical Session",
+        duration: `${durationMinutes} min`,
+        segmentCount: segments.length,
+        viewUrl: `/api/patient/transcripts/${appointment.id}/download?mode=view`,
+        downloadUrl: `/api/patient/transcripts/${appointment.id}/download?mode=download`,
+      } satisfies PatientTranscriptItem;
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+
+  return items;
+}
+
 export async function getPatientReportById(reportId: string) {
   const user = await currentUser();
 
   if (!user) {
-    redirect("/");
+    return null;
   }
 
   const dbUser = await prisma.user.findUnique({
@@ -371,7 +458,7 @@ export async function getPatientReportStats() {
   const user = await currentUser();
 
   if (!user) {
-    redirect("/");
+    return null;
   }
 
   const dbUser = await prisma.user.findUnique({
@@ -457,7 +544,7 @@ export async function searchPatientReports(query: string) {
   const user = await currentUser();
 
   if (!user) {
-    redirect("/");
+    return [];
   }
 
   const dbUser = await prisma.user.findUnique({
@@ -510,7 +597,7 @@ export async function searchTestKeyTrends(keyQuery: string) {
   const user = await currentUser();
 
   if (!user) {
-    redirect("/");
+    return [];
   }
 
   const dbUser = await prisma.user.findUnique({
@@ -615,7 +702,7 @@ export async function getAllTestKeys() {
   const user = await currentUser();
 
   if (!user) {
-    redirect("/");
+    return [];
   }
 
   const dbUser = await prisma.user.findUnique({

@@ -38,6 +38,8 @@ type PersistTranscriptResult = {
   error?: string;
   aiStatus?: string | null;
   transcriptSegments?: number;
+  facts?: Record<string, unknown> | null;
+  segments?: Prisma.JsonArray;
 };
 
 function normalizeSegments(raw: unknown): Prisma.JsonArray {
@@ -106,19 +108,49 @@ export async function confirmAndSaveAppointmentTranscription(appointmentId: stri
   });
 
   try {
+    // Download audio from UploadThing via Next.js server fetch
+    // (Modal's Python backend may get 403 on UploadThing URLs, so we proxy the bytes)
+    let audioBase64: string | null = null;
+    try {
+      const audioResponse = await fetch(appointment.recordingUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; ClinicalCopilot-NextJS/1.0)",
+          "Accept": "audio/*,*/*",
+        },
+        signal: AbortSignal.timeout(60000),
+        cache: "no-store",
+      });
+      if (audioResponse.ok) {
+        const audioArrayBuffer = await audioResponse.arrayBuffer();
+        const audioBuffer = Buffer.from(audioArrayBuffer);
+        audioBase64 = audioBuffer.toString("base64");
+        console.log(`Downloaded audio: ${audioBuffer.length} bytes for base64 transfer`);
+      } else {
+        console.warn(`Audio download returned ${audioResponse.status}, falling back to URL mode`);
+      }
+    } catch (audioErr) {
+      console.warn("Could not download audio via Next.js, falling back to URL mode:", audioErr);
+    }
+
     const transcriptionBackendUrl = resolveTranscriptionBackendUrl();
     const endpointUrl = `${transcriptionBackendUrl}/api/transcribe-upload`;
+
+    const requestBody: Record<string, unknown> = {
+      diarize: true,
+    };
+    if (audioBase64) {
+      requestBody.audio_base64 = audioBase64;
+    } else {
+      requestBody.recording_url = appointment.recordingUrl;
+    }
 
     const response = await fetch(endpointUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json",
       },
-      body: JSON.stringify({
-        recording_url: appointment.recordingUrl,
-        diarize: true,
-      }),
-      signal: AbortSignal.timeout(120000),
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(300000),
       cache: "no-store",
     });
 
@@ -142,9 +174,11 @@ export async function confirmAndSaveAppointmentTranscription(appointmentId: stri
     const transcriptionResult = (await response.json()) as {
       text?: string;
       segments?: unknown;
+      facts?: Record<string, unknown> | null;
     };
 
     const normalizedSegments = normalizeSegments(transcriptionResult.segments);
+    const extractedFacts = transcriptionResult.facts || null;
 
     await prisma.appointment.update({
       where: { id: appointment.id },
@@ -154,6 +188,20 @@ export async function confirmAndSaveAppointmentTranscription(appointmentId: stri
       },
     });
 
+    // Save batch facts to the database (non-blocking if Fact model fails)
+    if (extractedFacts) {
+      try {
+        await (prisma as any).fact.create({
+          data: {
+            appointmentId: appointment.id,
+            extractedData: extractedFacts as Prisma.InputJsonValue,
+          },
+        });
+      } catch (factError) {
+        console.warn("Failed to save batch facts (non-fatal):", factError);
+      }
+    }
+
     revalidatePath(`/doctor/clinical-session/${appointment.id}`);
     revalidatePath("/doctor/dashboard");
 
@@ -161,6 +209,8 @@ export async function confirmAndSaveAppointmentTranscription(appointmentId: stri
       success: true,
       aiStatus: "COMPLETED",
       transcriptSegments: normalizedSegments.length,
+      facts: extractedFacts,
+      segments: normalizedSegments,
     };
   } catch (error) {
     const transcriptionBackendUrl = resolveTranscriptionBackendUrl();

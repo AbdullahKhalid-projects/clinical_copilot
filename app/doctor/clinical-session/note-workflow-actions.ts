@@ -24,7 +24,9 @@ const db = prisma as any;
 
 function resolveNoteBackendUrl() {
   const configuredUrl =
-    process.env.PYTHON_BACKEND_URL?.trim() || process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL?.trim();
+    process.env.PYTHON_BACKEND_URL?.trim()
+    || process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL?.trim()
+    || process.env.NEXT_PUBLIC_API_URL?.trim();
 
   const baseUrl = configuredUrl && configuredUrl.length > 0 ? configuredUrl : "http://127.0.0.1:8000";
   return baseUrl.replace(/\/+$/, "");
@@ -163,35 +165,54 @@ export async function getActiveNoteTemplatesForSession(): Promise<ActiveNoteTemp
     return { success: false, error: "User not found" };
   }
 
-  const templates = await db.noteTemplate.findMany({
+  const personalTemplates = await db.noteTemplate.findMany({
     where: {
       source: "PERSONAL",
       userId: dbUser.id,
-      isActive: true,
     },
     include: {
       fields: {
         orderBy: { fieldOrder: "asc" },
       },
     },
-    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
   });
+
+  const libraryTemplates = await db.noteTemplate.findMany({
+    where: {
+      source: "LIBRARY",
+    },
+    include: {
+      fields: {
+        orderBy: { fieldOrder: "asc" },
+      },
+    },
+    orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
+  });
+
+  const merged = [...personalTemplates, ...libraryTemplates];
 
   return {
     success: true,
-    templates: templates.map((template: any) => ({
+    templates: merged.map((template: any) => ({
       id: template.id,
       name: template.name,
       description: template.description ?? "",
       template: mapRecordToSoapTemplate(template),
     })),
-    defaultTemplateId: templates[0]?.id,
+    defaultTemplateId: merged[0]?.id,
   };
 }
 
 export async function generateAppointmentNoteFromTemplate(
   appointmentId: string,
   templateId: string,
+  overrides?: {
+    transcriptSegments?: NormalizedTranscriptSegment[];
+    transcriptText?: string;
+    facts?: Record<string, unknown>;
+    speakerMapping?: Record<string, string>;
+  },
 ): Promise<GenerateTemplateNoteResult> {
   const user = await currentUser();
   if (!user) {
@@ -243,9 +264,10 @@ export async function generateAppointmentNoteFromTemplate(
     db.noteTemplate.findFirst({
       where: {
         id: templateId,
-        source: "PERSONAL",
-        userId: dbUser.id,
-        isActive: true,
+        OR: [
+          { source: "PERSONAL", userId: dbUser.id },
+          { source: "LIBRARY" }
+        ],
       },
       include: {
         fields: {
@@ -263,8 +285,8 @@ export async function generateAppointmentNoteFromTemplate(
     return { success: false, error: "Selected template is unavailable. Use an active personal template." };
   }
 
-  const transcriptSegments = normalizeTranscriptSegments(appointment.transcript);
-  const transcriptText = buildTranscriptText(transcriptSegments);
+  const transcriptSegments = overrides?.transcriptSegments ?? normalizeTranscriptSegments(appointment.transcript);
+  const transcriptText = overrides?.transcriptText ?? buildTranscriptText(transcriptSegments);
 
   if (!transcriptText.trim()) {
     return { success: false, error: "No transcript found. Upload or record transcription before generating a note." };
@@ -307,6 +329,8 @@ export async function generateAppointmentNoteFromTemplate(
       patient_date_of_birth: patientMetadata.patient_date_of_birth,
       patient_id: patientMetadata.patient_id,
       visit_date: patientMetadata.visit_date,
+      live_facts: overrides?.facts ?? {},
+      speaker_mapping: overrides?.speakerMapping ?? {},
     },
   };
 
@@ -453,9 +477,10 @@ export async function saveAppointmentTemplateNoteDraft(
     db.noteTemplate.findFirst({
       where: {
         id: templateId,
-        source: "PERSONAL",
-        userId: dbUser.id,
-        isActive: true,
+        OR: [
+          { source: "PERSONAL", userId: dbUser.id },
+          { source: "LIBRARY" }
+        ],
       },
       include: {
         fields: {

@@ -345,6 +345,9 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [selectedMicrophoneId, setSelectedMicrophoneId] = React.useState<string>("default");
     const [isLoadingMicrophones, setIsLoadingMicrophones] = React.useState(false);
     const [recordingUrl, setRecordingUrl] = React.useState<string | null>(currentAppointment.recordingUrl ?? null);
+    const [isBatchTranscribing, setIsBatchTranscribing] = React.useState(false);
+    const [batchTranscriptReady, setBatchTranscriptReady] = React.useState(false);
+    const [batchFacts, setBatchFacts] = React.useState<Record<string, unknown> | null>(null);
     const [isRecordingInfoOpen, setIsRecordingInfoOpen] = React.useState(false);
     const [activeMainTab, setActiveMainTab] = React.useState<ClinicalSessionTab>("context");
     const [isLanguageDialogOpen, setIsLanguageDialogOpen] = React.useState(false);
@@ -439,7 +442,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         [displayedTranscript],
     );
     const processedFacts = React.useMemo(() => {
-        const source = facts || {};
+        const source = (facts && Object.keys(facts).length > 0) ? facts : (batchFacts || {});
         const result: Array<{ label: string; value: string; timestamp?: number }> = [];
         const labelMap: Record<string, string> = {
             patient_profile: "Patient profile",
@@ -498,7 +501,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         });
 
         return result;
-    }, [facts]);
+    }, [facts, batchFacts]);
 
     const handleFactClick = React.useCallback((timestamp?: number) => {
         if (timestamp === undefined || !transcriptEndRef.current) {
@@ -517,7 +520,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         if (closestSegment) {
             // Scroll to the segment
             const segmentKey = `${closestSegment.speaker}-${closestSegment.start}-${closestSegment.end}`;
-            const element = document.querySelector(`[data-segment-key="${segmentKey}"]`);
+            const element = document.querySelector(`[data-segment-key="${segmentKey}"]`) as HTMLElement | null;
             if (element) {
                 element.scrollIntoView({ behavior: "smooth", block: "center" });
                 
@@ -876,6 +879,69 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         void startServer();
     }, [startSignal, pendingStartAfterLanguageSelection, connect, disconnect, waitForServerReady, toast]);
 
+    async function handleBatchUpload(audioFile: File) {
+        setIsBatchTranscribing(true);
+        setBatchTranscriptReady(false);
+
+        try {
+            console.log("Starting batch upload:", audioFile.name, audioFile.type, audioFile.size);
+            const res = await startUpload([audioFile], {
+                appointmentId: currentAppointment.id,
+            });
+
+            if (res && res[0]) {
+                const uploadedFile = res[0] as {
+                    ufsUrl?: string;
+                    appUrl?: string;
+                    url?: string;
+                    serverData?: { recordingUrl?: string };
+                };
+                const uploadedRecordingUrl = uploadedFile.serverData?.recordingUrl || uploadedFile.ufsUrl || uploadedFile.appUrl || uploadedFile.url;
+
+                if (!uploadedRecordingUrl) {
+                    throw new Error("No file URL returned by UploadThing");
+                }
+
+                setRecordingUrl(uploadedRecordingUrl);
+                setTempRecordingUrl(uploadedRecordingUrl);
+
+                const transcriptionResult = await confirmAndSaveAppointmentTranscription(currentAppointment.id);
+
+                if (transcriptionResult.success && transcriptionResult.segments && transcriptionResult.segments.length > 0) {
+                    setCurrentAppointment((prev: any) => ({
+                        ...prev,
+                        transcript: transcriptionResult.segments,
+                        recordingUrl: uploadedRecordingUrl,
+                        aiStatus: "COMPLETED",
+                    }));
+                    if (transcriptionResult.facts) {
+                        setBatchFacts(transcriptionResult.facts as Record<string, unknown>);
+                    }
+                    setBatchTranscriptReady(true);
+                    toast({
+                        title: "Transcription complete",
+                        description: `Transcript (${transcriptionResult.segments.length} segments) and facts are ready. Click End Transcription to finalize.`,
+                    });
+                } else {
+                    toast({
+                        title: "Transcription failed",
+                        description: transcriptionResult.error || "Could not transcribe the audio.",
+                        variant: "destructive",
+                    });
+                }
+            }
+        } catch (error) {
+            console.error("Batch upload failed", error);
+            toast({
+                title: "Upload Failed",
+                description: "Could not process the recording. Please try again.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsBatchTranscribing(false);
+        }
+    }
+
     async function uploadAudioFile(audioFile: File) {
         setIsProcessing(true);
         setIsFinalizationDialogOpen(true);
@@ -915,10 +981,34 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                 setUploadProgress(100);
                 setFinalizationStep(2);
 
-                // Fidelity check is now done via Next.js API (independent of Modal)
-                // This ensures it works on Vercel without requiring Modal redeployment
-                const segmentsToSend = transcriptRef.current;
-                console.log("[clinical] Fidelity check - segments from ref:", segmentsToSend.length, "transcript state:", transcript.length);
+                // Step 2: Transcribe the uploaded audio automatically via the Python backend
+                // This ensures transcript + facts appear in the frontend immediately
+                let batchSegments: any[] | undefined;
+                try {
+                    const transcriptionResult = await confirmAndSaveAppointmentTranscription(currentAppointment.id);
+                    if (transcriptionResult.success) {
+                        batchSegments = transcriptionResult.segments as any[] | undefined;
+                        if (transcriptionResult.facts) {
+                            setBatchFacts(transcriptionResult.facts as Record<string, unknown>);
+                        }
+                        // Update currentAppointment so persistedTranscript picks up the new transcript
+                        if (batchSegments && batchSegments.length > 0) {
+                            setCurrentAppointment((prev: any) => ({
+                                ...prev,
+                                transcript: batchSegments,
+                                aiStatus: "COMPLETED",
+                            }));
+                        }
+                    } else {
+                        console.warn("[clinical] Batch transcription failed:", transcriptionResult.error);
+                    }
+                } catch (transcribeErr) {
+                    console.error("[clinical] Batch transcription error:", transcribeErr);
+                }
+
+                // Fidelity check with the newly transcribed segments
+                const segmentsToSend = batchSegments ? (batchSegments as any[]) : transcriptRef.current;
+                console.log("[clinical] Fidelity check - segments count:", segmentsToSend.length);
 
                 try {
                     const payload = {
@@ -926,12 +1016,6 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                         transcriptSegments: segmentsToSend,
                         speakerLabels: speakerRoles,
                     };
-                    console.log("[clinical] Fidelity check payload:", {
-                        audioUrl: payload.audioUrl.substring(0, 60) + "...",
-                        segmentCount: payload.transcriptSegments.length,
-                        firstSegmentText: payload.transcriptSegments[0]?.text?.substring(0, 50) || "none",
-                        speakerLabelCount: Object.keys(payload.speakerLabels).length,
-                    });
 
                     const fidelityResponse = await fetch("/api/fidelity-check", {
                         method: "POST",
@@ -943,8 +1027,6 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
                     if (fidelityResponse.ok) {
                         const fidelityData = await fidelityResponse.json();
-                        console.log("[clinical] Fidelity check FULL response:", fidelityData);
-                        console.log("[clinical] Gemini raw:", fidelityData.gemini_raw || "(no raw output)");
 
                         if (fidelityData.fidelity_source === "gemini" && typeof fidelityData.fidelity_score === "number") {
                             setFidelityScore(fidelityData.fidelity_score);
@@ -985,6 +1067,60 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         }
     }
 
+    const handleEndBatchTranscription = React.useCallback(async () => {
+        setIsProcessing(true);
+        setIsFinalizationDialogOpen(true);
+        setIsUploading(true);
+        setUploadProgress(0);
+        setFinalizationStep(1);
+        setBatchTranscriptReady(false);
+
+        await new Promise(resolve => setTimeout(resolve, 400));
+        setUploadProgress(100);
+        setFinalizationStep(2);
+
+        const segmentsToSend = Array.isArray(currentAppointment?.transcript) ? currentAppointment.transcript as any[] : transcriptRef.current;
+        const currentUrl = recordingUrl || currentAppointment.recordingUrl;
+
+        try {
+            const payload = {
+                audioUrl: currentUrl || "",
+                transcriptSegments: segmentsToSend,
+                speakerLabels: speakerRoles,
+            };
+
+            const fidelityResponse = await fetch("/api/fidelity-check", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+
+            if (fidelityResponse.ok) {
+                const fidelityData = await fidelityResponse.json();
+                if (fidelityData.fidelity_source === "gemini" && typeof fidelityData.fidelity_score === "number") {
+                    setFidelityScore(fidelityData.fidelity_score);
+                } else {
+                    setFidelityScore(null);
+                }
+                if (fidelityData.fidelity_reasoning) {
+                    setFidelityReasoning(fidelityData.fidelity_reasoning);
+                }
+                setFidelitySource(fidelityData.fidelity_source || null);
+            } else {
+                setFidelityScore(null);
+                setFidelitySource("error");
+            }
+        } catch (error) {
+            console.error("[clinical] Fidelity check error:", error);
+            setFidelityScore(null);
+            setFidelitySource("error");
+        }
+
+        setFinalizationStep(3);
+        setIsUploading(false);
+        setIsProcessing(false);
+    }, [currentAppointment?.transcript, recordingUrl, speakerRoles]);
+
     const handleManualUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file) return;
@@ -999,7 +1135,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             return;
         }
 
-        await uploadAudioFile(file);
+        await handleBatchUpload(file);
         event.target.value = "";
     };
 
@@ -1404,19 +1540,25 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const handleSaveTranscription = React.useCallback(async () => {
         setIsSavingToDatabase(true);
         try {
-            // Save transcript and facts to database
-            const transcriptionResult = await confirmAndSaveAppointmentTranscription(currentAppointment.id);
-            
-            if (!transcriptionResult.success) {
-                toast({
-                    title: "Save failed",
-                    description: transcriptionResult.error || "Could not save transcript and facts.",
-                    variant: "destructive",
-                });
-                return;
+            const hasRecordingUrl = Boolean(currentAppointment.recordingUrl);
+            const alreadyTranscribed = Array.isArray(currentAppointment?.transcript)
+                && currentAppointment.transcript.length > 0;
+
+            if (hasRecordingUrl && !alreadyTranscribed) {
+                // Batch upload flow: transcribe via REST API to persist to DB
+                const transcriptionResult = await confirmAndSaveAppointmentTranscription(currentAppointment.id);
+
+                if (!transcriptionResult.success) {
+                    toast({
+                        title: "Save failed",
+                        description: transcriptionResult.error || "Could not save transcript and facts.",
+                        variant: "destructive",
+                    });
+                    return;
+                }
             }
 
-            // Save extracted facts
+            // Save transcript and facts to database directly (works for both live + batch)
             const artifactSaveResult = await saveSessionFinalArtifacts(currentAppointment.id, {
                 extractedFacts: facts as Record<string, unknown>,
                 finalTranscript: mappedTranscript as unknown,
@@ -1453,7 +1595,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         } finally {
             setIsSavingToDatabase(false);
         }
-    }, [currentAppointment.id, facts, mappedTranscript, loadFinalizeChecklist, openSpeakerReview, toast]);
+    }, [currentAppointment.id, currentAppointment.recordingUrl, currentAppointment.transcript, facts, mappedTranscript, loadFinalizeChecklist, openSpeakerReview, toast]);
 
     const handleFinalizeSession = React.useCallback(async () => {
         setIsFinalizingSession(true);
@@ -1892,6 +2034,25 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                 onManualUpload={handleManualUpload}
                                 uploadInputRef={uploadInputRef}
                             />
+                            {isBatchTranscribing && (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground w-full mt-1">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Transcribing audio...
+                                </div>
+                            )}
+                            {batchTranscriptReady && (
+                                <div className="w-full mt-1">
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        className="h-9 bg-red-600 hover:bg-red-700 text-white border-0 shadow-sm"
+                                        onClick={handleEndBatchTranscription}
+                                    >
+                                        <StopCircle className="w-4 h-4 mr-1.5 fill-current" />
+                                        End Transcription
+                                    </Button>
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex flex-wrap items-center gap-1.5 text-sm">
@@ -2567,7 +2728,17 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                         type="button"
                                                         size="sm"
                                                         className="mt-3 w-full h-8"
-                                                        onClick={() => {
+                                                        onClick={async () => {
+                                                            // Save transcript + facts to DB first so checklist shows green
+                                                            try {
+                                                                await saveSessionFinalArtifacts(currentAppointment.id, {
+                                                                    extractedFacts: facts as Record<string, unknown>,
+                                                                    finalTranscript: mappedTranscript as unknown,
+                                                                });
+                                                            } catch (saveErr) {
+                                                                console.error("Failed to persist transcript before finalization", saveErr);
+                                                            }
+
                                                             // Send all speaker label changes to the backend
                                                             Object.entries(finalSpeakerDraftMapping).forEach(([speakerId, label]) => {
                                                                 setSpeakerLabel(speakerId, label);
@@ -2582,6 +2753,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                                 ...finalSpeakerDraftMapping,
                                                             }));
                                                             setFinalizationStep(4);
+                                                            openSpeakerReview();
                                                         }}
                                                     >
                                                         Continue to Save
@@ -2806,6 +2978,23 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                     </>
                                 ) : (
                                     "Save Transcript & Facts"
+                                )}
+                            </Button>
+                        )}
+                        {canFinalizeSession && !isSessionFinalized && (
+                            <Button
+                                type="button"
+                                className="border border-black bg-black text-white hover:bg-stone-800 hover:text-white"
+                                onClick={handleFinalizeSession}
+                                disabled={isFinalizingSession}
+                            >
+                                {isFinalizingSession ? (
+                                    <>
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        Finalizing...
+                                    </>
+                                ) : (
+                                    "Finalize Session"
                                 )}
                             </Button>
                         )}

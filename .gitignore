@@ -9,6 +9,13 @@
 
 # production
 /build
+/python/__pycache__/
+/python/dist/
+/python/__init__.py
+/python/venv
+/python/venv/
+/.venv/
+/venv/
 
 # debug
 npm-debug.log*
