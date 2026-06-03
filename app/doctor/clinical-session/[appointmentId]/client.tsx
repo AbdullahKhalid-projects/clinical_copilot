@@ -2034,24 +2034,24 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                 onManualUpload={handleManualUpload}
                                 uploadInputRef={uploadInputRef}
                             />
+                        </div>
+                        <div className="flex items-center gap-3 justify-end">
                             {isBatchTranscribing && (
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground w-full mt-1">
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                     Transcribing audio...
                                 </div>
                             )}
                             {batchTranscriptReady && (
-                                <div className="w-full mt-1">
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        className="h-9 bg-red-600 hover:bg-red-700 text-white border-0 shadow-sm"
-                                        onClick={handleEndBatchTranscription}
-                                    >
-                                        <StopCircle className="w-4 h-4 mr-1.5 fill-current" />
-                                        End Transcription
-                                    </Button>
-                                </div>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    className="h-9 bg-red-600 hover:bg-red-700 text-white border-0 shadow-sm"
+                                    onClick={handleEndBatchTranscription}
+                                >
+                                    <StopCircle className="w-4 h-4 mr-1.5 fill-current" />
+                                    End Transcription
+                                </Button>
                             )}
                         </div>
 
@@ -2753,10 +2753,9 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                                 ...finalSpeakerDraftMapping,
                                                             }));
                                                             setFinalizationStep(4);
-                                                            openSpeakerReview();
                                                         }}
                                                     >
-                                                        Continue to Save
+                                                        Save
                                                     </Button>
                                                 )}
                                             </>

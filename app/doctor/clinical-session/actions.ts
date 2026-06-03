@@ -1099,18 +1099,18 @@ export async function saveSessionFinalArtifacts(
     });
   }
 
-  // Save extracted facts separately — the Fact model may not exist in the DB yet,
-  // so this must never block the transcript save.
+  // Save extracted facts separately — Fact table might not exist yet;
+  // this must never block the transcript save.
   if (hasFacts) {
     try {
-      await (prisma as any).fact.create({
+      await prisma.fact.create({
         data: {
           appointmentId: appointment.id,
           extractedData: extractedFacts as Prisma.InputJsonValue,
         },
       });
     } catch (factErr) {
-      console.error("Failed to persist extracted facts (non-blocking):", factErr);
+      console.warn("Failed to persist facts (non-fatal; run `prisma db push` to create Fact table):", (factErr as Error)?.message ?? factErr);
     }
   }
 

@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 // Page Component (Server Side)
 import { getDoctorPatients } from "@/app/actions/doctorActions";
 import PatientsClient from "./patients-client";

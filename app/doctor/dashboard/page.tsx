@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 // Server Component
 import { getDoctorDashboardData } from "@/app/actions/doctorActions";
 import DashboardClient from "./dashboard-client";

@@ -188,17 +188,17 @@ export async function confirmAndSaveAppointmentTranscription(appointmentId: stri
       },
     });
 
-    // Save batch facts to the database (non-blocking if Fact model fails)
+    // Save batch facts to the database (non-blocking if Fact table doesn't exist yet)
     if (extractedFacts) {
       try {
-        await (prisma as any).fact.create({
+        await prisma.fact.create({
           data: {
             appointmentId: appointment.id,
             extractedData: extractedFacts as Prisma.InputJsonValue,
           },
         });
       } catch (factError) {
-        console.warn("Failed to save batch facts (non-fatal):", factError);
+        console.warn("Failed to persist batch facts (non-fatal; run `prisma db push` to create Fact table):", (factError as Error)?.message ?? factError);
       }
     }
 
