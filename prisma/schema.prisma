@@ -159,6 +159,8 @@ model Document {
   title           String
   content         String       @db.Text
   pdfUrl          String?
+  hospitalName    String?
+  reportDate      DateTime?
   type            DocumentType @default(RAG)
   ragSubtype      RagSubtype?
   patientDataType PatientDataType?
@@ -279,6 +281,7 @@ model DoctorProfile {
   
   appointments   Appointment[]
   prescriptions  Prescription[]
+  voiceEmbedding VoiceEmbedding?
 }
 
 // Patient Schema
@@ -313,6 +316,32 @@ model PatientProfile {
   reminders      PatientReminder[]
 }
 
+model MedicineCatalog {
+  id                   String         @id @default(cuid())
+  drugName             String
+  drugNameNormalized   String
+  manufacturer         String?
+  strength             String?
+  form                 String?
+  indication           String?        @db.Text
+  sideEffects          String?        @db.Text
+  availableIn          String?
+  ageRestriction       String?
+  prescriptionRequired Boolean        @default(false)
+  price                String?
+  imageUrl             String?
+  source               String?        @default("medicine_data")
+  isActive             Boolean        @default(true)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  prescriptions        Prescription[]
+
+  @@index([drugName])
+  @@index([drugNameNormalized])
+  @@index([source])
+}
+
 // Prescription
 model Prescription {
   id          String   @id @default(uuid())
@@ -323,12 +352,23 @@ model Prescription {
   endDate     DateTime?
   status      String   @default("ACTIVE") // ACTIVE, COMPLETED, DISCONTINUED
   prescribedBy String? // Doctor name fallback
+  durationWeeks Int?
+  instructions String?
+  medicineStrength String?
+  medicineForm String?
+  medicineImageUrl String?
   
   patientId   String
   patient     PatientProfile @relation(fields: [patientId], references: [id], onDelete: Cascade)
   
   doctorId    String?
   doctor      DoctorProfile? @relation(fields: [doctorId], references: [id])
+
+  medicineCatalogId String?
+  medicineCatalog   MedicineCatalog? @relation(fields: [medicineCatalogId], references: [id], onDelete: SetNull)
+
+  appointmentId String?
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
 }
 
 // Health Metrics for Trends (Manually added or device synced)
@@ -394,6 +434,8 @@ model Appointment {
   
   patientId String?
   patient   PatientProfile? @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  prescriptions Prescription[]
+  facts     Fact[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -406,6 +448,18 @@ model Fact {
   extractedData  Json
 
   createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  appointment    Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
   @@index([appointmentId])
+}
+
+model VoiceEmbedding {
+  id            String   @id @default(uuid())
+  doctorId      String   @unique
+  embeddingData Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  doctor        DoctorProfile @relation(fields: [doctorId], references: [id], onDelete: Cascade)
 }

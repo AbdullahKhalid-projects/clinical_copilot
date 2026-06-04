@@ -2,6 +2,9 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import neo4j, { type Driver } from "neo4j-driver";
+import { verifyPrescriptionSafetyQuery } from "@/code";
+import { loadMedicationCatalogFromCsv, type MedicationCatalogItem } from "@/lib/medicine-catalog";
 import { uploadVisitSummaryPdfToCloudinary } from "@/lib/cloudinary";
 import { buildVisitSummaryFilename, formatVisitSummaryDateLabel } from "@/lib/visit-summary-pdf";
 import { renderNoteDocumentPdfBuffer } from "@/lib/note-document-pdf";
@@ -9,6 +12,13 @@ import { markSoapNoteAsFinalized } from "@/lib/visit-summary";
 import { mapRecordToSoapTemplate } from "@/lib/template-utils";
 import { currentUser, clerkClient } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
+
+const NEO4J_URI = process.env.NEO4J_URI?.trim() ?? "";
+const NEO4J_USERNAME = process.env.NEO4J_USERNAME?.trim() ?? "";
+const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD ?? "";
+const NEO4J_DATABASE = process.env.NEO4J_DATABASE?.trim() || undefined;
+
+let neo4jDriverSingleton: Driver | null = null;
 
 function isLikelyClerkUserId(value: string | null | undefined): value is string {
   if (!value) return false;
@@ -96,10 +106,94 @@ function hasGeneratedNote(rawSoapNote: unknown): boolean {
   );
 }
 
+type Neo4jQueryRow = Record<string, unknown>;
+
+function getNeo4jDriverOrError(): { driver: Driver | null; error?: string } {
+  if (!NEO4J_URI || !NEO4J_USERNAME || !NEO4J_PASSWORD) {
+    const missing = [
+      !NEO4J_URI && "NEO4J_URI",
+      !NEO4J_USERNAME && "NEO4J_USERNAME",
+      !NEO4J_PASSWORD && "NEO4J_PASSWORD",
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    return {
+      driver: null,
+      error: `Neo4j is not configured. Missing: ${missing}.`,
+    };
+  }
+
+  if (!neo4jDriverSingleton) {
+    neo4jDriverSingleton = neo4j.driver(
+      NEO4J_URI,
+      neo4j.auth.basic(NEO4J_USERNAME, NEO4J_PASSWORD),
+      { disableLosslessIntegers: true },
+    );
+  }
+
+  return { driver: neo4jDriverSingleton };
+}
+
+async function runNeo4jReadQuery(
+  query: string,
+  params: Record<string, unknown>,
+): Promise<{ ok: true; rows: Neo4jQueryRow[] } | { ok: false; error: string }> {
+  const { driver, error } = getNeo4jDriverOrError();
+  if (!driver) {
+    return {
+      ok: false,
+      error: error ?? "Neo4j driver is not available.",
+    };
+  }
+
+  const session = driver.session(
+    NEO4J_DATABASE
+      ? {
+          defaultAccessMode: neo4j.session.READ,
+          database: NEO4J_DATABASE,
+        }
+      : {
+          defaultAccessMode: neo4j.session.READ,
+        },
+  );
+
+  try {
+    const result = await session.executeRead((tx: any) => tx.run(query, params));
+    const rows: Neo4jQueryRow[] = result.records.map((record: any) => {
+      const row: Neo4jQueryRow = {};
+      for (const key of record.keys) {
+        row[key] = record.get(key);
+      }
+      return row;
+    });
+
+    return { ok: true, rows };
+  } catch (queryError) {
+    return {
+      ok: false,
+      error: queryError instanceof Error ? queryError.message : "Neo4j query failed.",
+    };
+  } finally {
+    await session.close();
+  }
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : String(item ?? "").trim()))
+    .filter((item) => item.length > 0);
+}
+
 export type FinalizeChecklist = {
   patientLinked: boolean;
   transcriptReady: boolean;
   noteReady: boolean;
+  medicationPrescribed: boolean;
 };
 
 export type FinalizeTaskKey = keyof FinalizeChecklist;
@@ -131,22 +225,25 @@ const EMPTY_FINALIZE_CHECKLIST: FinalizeChecklist = {
   patientLinked: false,
   transcriptReady: false,
   noteReady: false,
+  medicationPrescribed: false,
 };
 
 function buildFinalizeChecklist(appointment: {
   patientId: string | null;
   transcript: unknown;
   soapNote: unknown;
+  prescriptionCount?: number;
 }): FinalizeChecklist {
   return {
     patientLinked: Boolean(appointment.patientId),
     transcriptReady: hasTranscriptContent(appointment.transcript),
     noteReady: hasGeneratedNote(appointment.soapNote),
+    medicationPrescribed: (appointment.prescriptionCount ?? 0) > 0,
   };
 }
 
 function canFinalizeFromChecklist(checklist: FinalizeChecklist): boolean {
-  return checklist.patientLinked && checklist.transcriptReady && checklist.noteReady;
+  return checklist.patientLinked && checklist.transcriptReady && checklist.noteReady && checklist.medicationPrescribed;
 }
 
 function buildFinalizeChecklistBlockers(
@@ -190,16 +287,76 @@ function buildFinalizeChecklistBlockers(
     });
   }
 
+  if (!checklist.medicationPrescribed) {
+    blockers.push({
+      key: "medicationPrescribed",
+      title: "Prescribe medication",
+      description: "Add at least one medication in the Medication tab before finalizing this clinical session.",
+      actionLabel: "Go to Medication",
+    });
+  }
+
   return blockers;
 }
 
 function buildFinalizeChecklistProgress(checklist: FinalizeChecklist): FinalizeChecklistProgress {
-  const completed = [checklist.patientLinked, checklist.transcriptReady, checklist.noteReady].filter(Boolean).length;
+  const completed = [
+    checklist.patientLinked,
+    checklist.transcriptReady,
+    checklist.noteReady,
+    checklist.medicationPrescribed,
+  ].filter(Boolean).length;
   return {
     completed,
-    total: 3,
+    total: 4,
   };
 }
+
+export type MedicationFinalizeDraft = {
+  medicineCatalogId: string | null;
+  name: string;
+  strength: string | null;
+  form: string | null;
+  durationWeeks: number;
+  scheduleCounts: {
+    day: number;
+    noon: number;
+    night: number;
+  };
+};
+
+export type MedicationSafetyReviewDraft = {
+  draftId: string;
+  drugName: string;
+  queryDrug?: string | null;
+  strength: string | null;
+  form: string | null;
+  indication: string | null;
+  durationWeeks: number;
+  scheduleCounts: {
+    day: number;
+    noon: number;
+    night: number;
+  };
+};
+
+export type MedicationSafetyReviewItemResult = {
+  draftId: string;
+  proposedDrug: string;
+  proposedMedicine: string | null;
+  warningAllergies: string[];
+  warningInteractions: string[];
+  warningContraindications: string[];
+  status: "safe" | "warning" | "caution";
+  error?: string;
+};
+
+export type MedicationSafetyReviewResult = {
+  success: boolean;
+  patientId: string | null;
+  results: MedicationSafetyReviewItemResult[];
+  error?: string;
+};
 
 export async function getClinicalSessionData(appointmentId: string) {
   const doctor = await getCurrentDoctor();
@@ -216,13 +373,49 @@ export async function getClinicalSessionData(appointmentId: string) {
       doctorId: doctor.id,
     },
     include: {
+      doctor: true,
       patient: {
         include: {
           user: true, // to get name
+          prescriptions: {
+            where: {
+              status: "ACTIVE",
+            },
+            orderBy: {
+              startDate: "desc",
+            },
+            include: {
+              doctor: {
+                include: {
+                  user: true,
+                },
+              },
+            },
+          },
         }
       }
     }
   });
+
+  let doctorVoiceEmbeddingData: unknown = null;
+  if (appointment?.doctorId) {
+    try {
+      const db = prisma as any;
+      if (db.voiceEmbedding?.findUnique) {
+        const voiceEmbedding = await db.voiceEmbedding.findUnique({
+          where: {
+            doctorId: appointment.doctorId,
+          },
+          select: {
+            embeddingData: true,
+          },
+        });
+        doctorVoiceEmbeddingData = voiceEmbedding?.embeddingData ?? null;
+      }
+    } catch (error) {
+      console.warn("Could not load doctor voice embedding for clinical session:", error);
+    }
+  }
 
   // Fetch patient user details from Clerk manually if needed, 
   // or just rely on what we have. But the user asked for Clerk Profile Pic.
@@ -238,7 +431,247 @@ export async function getClinicalSessionData(appointmentId: string) {
     }
   }
 
-  return { ...appointment, patientImageUrl };
+  return { ...appointment, patientImageUrl, doctorVoiceEmbeddingData };
+}
+
+export type MedicationPrescriptionSummary = {
+  id: string;
+  name: string;
+  dosage: string;
+  frequency: string;
+  durationWeeks: number | null;
+  status: string;
+  prescribedBy: string | null;
+  medicineStrength: string | null;
+  medicineForm: string | null;
+  medicineImageUrl: string | null;
+};
+
+export type MedicationCatalogResult = {
+  success: boolean;
+  medications: MedicationCatalogItem[];
+  source: "database" | "csv";
+  error?: string;
+};
+
+function mapMedicationCatalogRecord(record: any): MedicationCatalogItem {
+  return {
+    id: String(record.id),
+    drugName: String(record.drugName),
+    drugNameNormalized: String(record.drugNameNormalized || record.drugName),
+    manufacturer: record.manufacturer ? String(record.manufacturer) : null,
+    strength: record.strength ? String(record.strength) : null,
+    form: record.form ? String(record.form) : null,
+    indication: record.indication ? String(record.indication) : null,
+    sideEffects: record.sideEffects ? String(record.sideEffects) : null,
+    availableIn: record.availableIn ? String(record.availableIn) : null,
+    ageRestriction: record.ageRestriction ? String(record.ageRestriction) : null,
+    prescriptionRequired: Boolean(record.prescriptionRequired),
+    price: record.price ? String(record.price) : null,
+    imageUrl: record.imageUrl ? String(record.imageUrl) : null,
+    source: record.source ? String(record.source) : null,
+  };
+}
+
+export async function getMedicationCatalogForSession(appointmentId: string): Promise<MedicationCatalogResult> {
+  const doctor = await getCurrentDoctor();
+  if (!doctor) {
+    return {
+      success: false,
+      medications: [],
+      source: "csv",
+      error: "Doctor profile not found",
+    };
+  }
+
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      doctorId: doctor.id,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!appointment) {
+    return {
+      success: false,
+      medications: [],
+      source: "csv",
+      error: "Appointment not found",
+    };
+  }
+
+  try {
+    const db = prisma as any;
+    if (db.medicineCatalog?.findMany) {
+      const records = await db.medicineCatalog.findMany({
+        where: {
+          isActive: true,
+        },
+        orderBy: {
+          drugName: "asc",
+        },
+      });
+
+      if (Array.isArray(records) && records.length > 0) {
+        return {
+          success: true,
+          medications: records.map(mapMedicationCatalogRecord),
+          source: "database",
+        };
+      }
+    }
+  } catch (error) {
+    console.warn("Medicine catalog DB lookup failed; falling back to CSV:", error);
+  }
+
+  try {
+    const medications = await loadMedicationCatalogFromCsv();
+    return {
+      success: true,
+      medications,
+      source: "csv",
+    };
+  } catch (error) {
+    console.error("Failed to load medication catalog from CSV", error);
+    return {
+      success: false,
+      medications: [],
+      source: "csv",
+      error: "Medication catalog could not be loaded from the database or CSV source.",
+    };
+  }
+}
+
+export async function runMedicationSafetyReview(
+  appointmentId: string,
+  drafts: MedicationSafetyReviewDraft[],
+): Promise<MedicationSafetyReviewResult> {
+  const doctor = await getCurrentDoctor();
+  if (!doctor) {
+    return {
+      success: false,
+      patientId: null,
+      results: [],
+      error: "Doctor profile not found",
+    };
+  }
+
+  if (drafts.length === 0) {
+    return {
+      success: false,
+      patientId: null,
+      results: [],
+      error: "No medications were provided for safety review.",
+    };
+  }
+
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      doctorId: doctor.id,
+    },
+    select: {
+      patientId: true,
+    },
+  });
+
+  if (!appointment) {
+    return {
+      success: false,
+      patientId: null,
+      results: [],
+      error: "Appointment not found",
+    };
+  }
+
+  if (!appointment.patientId) {
+    return {
+      success: false,
+      patientId: null,
+      results: [],
+      error: "Link a patient before running medication safety review.",
+    };
+  }
+
+  const results = await Promise.all(
+    drafts.map(async (draft): Promise<MedicationSafetyReviewItemResult> => {
+      const proposedDrug = draft.queryDrug?.trim() || draft.drugName.trim();
+      if (!proposedDrug) {
+        return {
+          draftId: draft.draftId,
+          proposedDrug: "",
+          proposedMedicine: null,
+          warningAllergies: [],
+          warningInteractions: [],
+          warningContraindications: [],
+          status: "caution",
+          error: "Medication name is missing for safety review.",
+        };
+      }
+
+      const queryResult = await runNeo4jReadQuery(verifyPrescriptionSafetyQuery, {
+        patientId: appointment.patientId,
+        proposedDrug,
+      });
+
+      if (!queryResult.ok) {
+        return {
+          draftId: draft.draftId,
+          proposedDrug,
+          proposedMedicine: null,
+          warningAllergies: [],
+          warningInteractions: [],
+          warningContraindications: [],
+          status: "caution",
+          error: queryResult.error,
+        };
+      }
+
+      const firstRow = queryResult.rows[0];
+      if (!firstRow) {
+        return {
+          draftId: draft.draftId,
+          proposedDrug,
+          proposedMedicine: null,
+          warningAllergies: [],
+          warningInteractions: [],
+          warningContraindications: [],
+          status: "caution",
+          error: "No Neo4j result rows found for this medication.",
+        };
+      }
+
+      const warningAllergies = toStringArray(firstRow.Warning_Allergies);
+      const warningInteractions = toStringArray(firstRow.Warning_Interactions);
+      const warningContraindications = toStringArray(firstRow.Warning_Contraindications);
+      const hasWarnings =
+        warningAllergies.length > 0 ||
+        warningInteractions.length > 0 ||
+        warningContraindications.length > 0;
+
+      return {
+        draftId: draft.draftId,
+        proposedDrug,
+        proposedMedicine:
+          typeof firstRow.ProposedMedicine === "string" && firstRow.ProposedMedicine.trim()
+            ? firstRow.ProposedMedicine.trim()
+            : null,
+        warningAllergies,
+        warningInteractions,
+        warningContraindications,
+        status: hasWarnings ? "warning" : "safe",
+      };
+    }),
+  );
+
+  return {
+    success: true,
+    patientId: appointment.patientId,
+    results,
+  };
 }
 
 export type PatientMetricCatalogResult = {
@@ -615,6 +1048,11 @@ export async function getAppointmentFinalizeChecklist(appointmentId: string): Pr
           },
         },
       },
+      _count: {
+        select: {
+          prescriptions: true,
+        },
+      },
     },
   });
 
@@ -629,7 +1067,10 @@ export async function getAppointmentFinalizeChecklist(appointmentId: string): Pr
     };
   }
 
-  const checklist = buildFinalizeChecklist(appointment);
+  const checklist = buildFinalizeChecklist({
+    ...appointment,
+    prescriptionCount: appointment._count.prescriptions,
+  });
   const blockers = buildFinalizeChecklistBlockers(checklist, appointment.aiStatus);
   const progress = buildFinalizeChecklistProgress(checklist);
 
@@ -674,7 +1115,10 @@ export async function uploadClientPdfToCloudinary(formData: FormData) {
 
 export async function finalizeAppointmentSession(
   appointmentId: string,
-  preUploadedPdfUrl?: string
+  options?: {
+    preUploadedPdfUrl?: string;
+    medicationDrafts?: MedicationFinalizeDraft[];
+  }
 ): Promise<FinalizeChecklistResult> {
   const doctor = await getCurrentDoctor();
   if (!doctor) {
@@ -714,11 +1158,17 @@ export async function finalizeAppointmentSession(
       },
       patient: {
         select: {
+          id: true,
           user: {
             select: {
               name: true,
             },
           },
+        },
+      },
+      _count: {
+        select: {
+          prescriptions: true,
         },
       },
     },
@@ -735,7 +1185,12 @@ export async function finalizeAppointmentSession(
     };
   }
 
-  const checklist = buildFinalizeChecklist(appointment);
+  const checklist = buildFinalizeChecklist({
+    ...appointment,
+    prescriptionCount: (options?.medicationDrafts?.length ?? 0) > 0
+      ? options?.medicationDrafts?.length
+      : appointment._count.prescriptions,
+  });
   const blockers = buildFinalizeChecklistBlockers(checklist, appointment.aiStatus);
   const progress = buildFinalizeChecklistProgress(checklist);
   const canFinalize = canFinalizeFromChecklist(checklist);
@@ -769,8 +1224,8 @@ export async function finalizeAppointmentSession(
 
   let noteDownloadUrl = fallbackDownloadUrl;
 
-  if (preUploadedPdfUrl) {
-    noteDownloadUrl = preUploadedPdfUrl;
+  if (options?.preUploadedPdfUrl) {
+    noteDownloadUrl = options.preUploadedPdfUrl;
   } else {
     // Try to generate template-based PDF from the appointment's soapNote
     try {
@@ -818,13 +1273,46 @@ export async function finalizeAppointmentSession(
     }
   }
 
-  await prisma.appointment.update({
-    where: { id: appointment.id },
-    data: {
-      status: "COMPLETED",
-      soapNote: finalizedSoapNote as Prisma.InputJsonValue,
-      soapNoteUrl: noteDownloadUrl,
-    },
+  await prisma.$transaction(async (tx) => {
+    if (appointment.patient?.id && options?.medicationDrafts?.length) {
+      const patientId = appointment.patient.id;
+      const doctorName = appointment.doctor?.user?.name?.trim();
+
+      await tx.prescription.createMany({
+        data: options.medicationDrafts.map((draft) => {
+          const startDate = new Date();
+          const endDate = new Date(startDate);
+          endDate.setDate(endDate.getDate() + draft.durationWeeks * 7);
+
+          return {
+            name: draft.name,
+            dosage: draft.strength || draft.form || "As prescribed",
+            frequency: `${draft.scheduleCounts.day}-${draft.scheduleCounts.noon}-${draft.scheduleCounts.night}`,
+            startDate,
+            endDate,
+            status: "ACTIVE",
+            prescribedBy: doctorName ? `Dr. ${doctorName}` : null,
+            durationWeeks: draft.durationWeeks,
+            instructions: `Morning ${draft.scheduleCounts.day}, Afternoon ${draft.scheduleCounts.noon}, Evening ${draft.scheduleCounts.night}`,
+            medicineStrength: draft.strength,
+            medicineForm: draft.form,
+            patientId,
+            doctorId: doctor.id,
+            medicineCatalogId: draft.medicineCatalogId,
+            appointmentId: appointment.id,
+          };
+        }),
+      });
+    }
+
+    await tx.appointment.update({
+      where: { id: appointment.id },
+      data: {
+        status: "COMPLETED",
+        soapNote: finalizedSoapNote as Prisma.InputJsonValue,
+        soapNoteUrl: noteDownloadUrl,
+      },
+    });
   });
 
   revalidatePath(`/doctor/clinical-session/${appointment.id}`);
@@ -832,6 +1320,7 @@ export async function finalizeAppointmentSession(
   revalidatePath("/doctor/dashboard");
   revalidatePath("/patient/visit-summaries");
   revalidatePath("/patient/dashboard");
+  revalidatePath("/patient/medications");
 
   return {
     success: true,

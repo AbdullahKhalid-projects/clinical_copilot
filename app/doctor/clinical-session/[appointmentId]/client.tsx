@@ -22,6 +22,8 @@ import {
     StopCircle,
     Play,
     FileText,
+    Pill,
+    Plus,
     Stethoscope,
     MessageSquare,
     Loader2,
@@ -44,6 +46,7 @@ import { useClinicalWebSocket, type TranscriptSegment } from "@/hooks/use-clinic
 import { SessionTabs, type ClinicalSessionTab } from "./components/session-tabs";
 import { LiveTranscriptPanel } from "./components/live-transcript-panel";
 import { SessionRecordingActions } from "./components/session-recording-actions";
+import { MedicationTab, type MedicationDraftSelection } from "./components/medication-tab";
 import { Thread } from "@/components/thread";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
@@ -98,6 +101,9 @@ import {
     linkPatientToAppointment,
     deleteAppointmentSession,
     saveSessionFinalArtifacts,
+    type MedicationFinalizeDraft,
+    type MedicationSafetyReviewDraft,
+    type MedicationSafetyReviewItemResult,
     type FinalizeChecklistResult,
     type LinkablePatient,
 } from "../actions";
@@ -128,6 +134,64 @@ type MetricChatRequest = {
     id: number;
     metric: string;
 };
+
+function buildMedicationSafetyPrompt(args: {
+    appointmentReason: string;
+    noteText: string;
+    drafts: MedicationSafetyReviewDraft[];
+}) {
+    const noteContext = args.noteText.trim().slice(0, 1200);
+    const medicationLines = args.drafts
+        .map((draft, index) => {
+            const formula = [draft.strength, draft.form].filter(Boolean).join(" - ") || "Formula not specified";
+            const indication = draft.indication?.trim() || "Indication not specified";
+            const queryDrug = draft.queryDrug?.trim() || draft.drugName;
+            return [
+                `${index + 1}. ${draft.drugName}`,
+                `Compound query term: ${queryDrug}`,
+                `Formula: ${formula}`,
+                `Indication: ${indication}`,
+                `Schedule: ${draft.scheduleCounts.day}-${draft.scheduleCounts.noon}-${draft.scheduleCounts.night}`,
+                `Duration: ${draft.durationWeeks} week${draft.durationWeeks > 1 ? "s" : ""}`,
+            ].join(" | ");
+        })
+        .join("\n");
+
+    return [
+        "Run a medication safety review for the staged prescriptions in this clinical session.",
+        "Use the verify_prescription_safety tool for every staged medication.",
+        "For proposedDrug, use the provided compound query term, not the brand/display name.",
+        "Do not ask follow-up questions.",
+        "Return one concise section per medication with: overall status, allergy conflicts, drug interactions, and contraindications.",
+        "If no warnings are found, explicitly say the graph safety check found no warnings.",
+        "",
+        `Appointment reason: ${args.appointmentReason || "Not specified"}`,
+        noteContext ? `Clinical note context:\n${noteContext}` : "Clinical note context: Not available",
+        "",
+        "Staged medications:",
+        medicationLines,
+    ].join("\n");
+}
+
+function deriveMedicationQueryDrug(draft: MedicationDraftSelection): string {
+    const strength = draft.medication.strength?.trim() || "";
+    const form = draft.medication.form?.trim() || "";
+
+    if (strength) {
+        const withoutLeadingDose = strength
+            .replace(/^\s*\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|%)+\s*/i, "")
+            .replace(/^\s*\d+(?:\.\d+)?\s*%+\s*/i, "")
+            .trim();
+
+        if (withoutLeadingDose) {
+            return form && !withoutLeadingDose.toLowerCase().includes(form.toLowerCase())
+                ? `${withoutLeadingDose} ${form}`.trim()
+                : withoutLeadingDose;
+        }
+    }
+
+    return draft.medication.drugName.trim();
+}
 
 function extractNoteTextFromPayload(rawSoapNote: any): string {
     if (!rawSoapNote || typeof rawSoapNote !== "object") {
@@ -326,7 +390,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     } = useClinicalWebSocket({
         backendUrl: pythonBackendUrl,
         language: selectedLanguage,
-        doctorVoiceEmbeddingData: currentAppointment?.doctor?.voiceEmbedding?.embeddingData ?? null,
+        doctorVoiceEmbeddingData: currentAppointment?.doctorVoiceEmbeddingData ?? null,
     });
 
     // State for recording and devices
@@ -350,6 +414,9 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [batchFacts, setBatchFacts] = React.useState<Record<string, unknown> | null>(null);
     const [isRecordingInfoOpen, setIsRecordingInfoOpen] = React.useState(false);
     const [activeMainTab, setActiveMainTab] = React.useState<ClinicalSessionTab>("context");
+    const [medicationDraftSelections, setMedicationDraftSelections] = React.useState<MedicationDraftSelection[]>([]);
+    const [medicationSafetyByDraftId, setMedicationSafetyByDraftId] = React.useState<Record<string, MedicationSafetyReviewItemResult>>({});
+    const [isMedicationSafetyReviewRunning, setIsMedicationSafetyReviewRunning] = React.useState(false);
     const [isLanguageDialogOpen, setIsLanguageDialogOpen] = React.useState(false);
     const [pendingStartAfterLanguageSelection, setPendingStartAfterLanguageSelection] = React.useState(false);
     const [startSignal, setStartSignal] = React.useState(0);
@@ -1490,7 +1557,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         void loadFinalizeChecklist();
     }, [loadFinalizeChecklist, searchParams]);
 
-    const handleFinalizeTaskAction = React.useCallback((taskKey: "patientLinked" | "transcriptReady" | "noteReady") => {
+    const handleFinalizeTaskAction = React.useCallback((taskKey: "patientLinked" | "transcriptReady" | "noteReady" | "medicationPrescribed") => {
         if (taskKey === "patientLinked") {
             if (hasLinkedPatient) {
                 handlePatientPrimaryAction();
@@ -1510,6 +1577,12 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
         if (taskKey === "transcriptReady") {
             setActiveMainTab("transcript");
+            setIsFinalizeDialogOpen(false);
+            return;
+        }
+
+        if (taskKey === "medicationPrescribed") {
+            setActiveMainTab("medication");
             setIsFinalizeDialogOpen(false);
             return;
         }
@@ -1600,7 +1673,18 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const handleFinalizeSession = React.useCallback(async () => {
         setIsFinalizingSession(true);
         try {
-            const result = await finalizeAppointmentSession(currentAppointment.id);
+            const medicationFinalizeDrafts: MedicationFinalizeDraft[] = medicationDraftSelections.map((draft) => ({
+                medicineCatalogId: draft.medication.id || null,
+                name: draft.medication.drugName,
+                strength: draft.medication.strength,
+                form: draft.medication.form,
+                durationWeeks: draft.durationWeeks,
+                scheduleCounts: draft.scheduleCounts,
+            }));
+
+            const result = await finalizeAppointmentSession(currentAppointment.id, {
+                medicationDrafts: medicationFinalizeDrafts,
+            });
             setFinalizeChecklistResult(result);
 
             if (!result.success) {
@@ -1616,7 +1700,31 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             setCurrentAppointment((prev: any) => ({
                 ...prev,
                 status: "COMPLETED",
+                patient: prev?.patient
+                    ? {
+                        ...prev.patient,
+                        prescriptions: [
+                            ...(Array.isArray(prev.patient.prescriptions) ? prev.patient.prescriptions : []),
+                            ...medicationFinalizeDrafts.map((draft, index) => ({
+                                id: `finalized-medication-${index}-${draft.name}`,
+                                name: draft.name,
+                                dosage: draft.strength || draft.form || "As prescribed",
+                                frequency: `${draft.scheduleCounts.day}-${draft.scheduleCounts.noon}-${draft.scheduleCounts.night}`,
+                                durationWeeks: draft.durationWeeks,
+                                status: "ACTIVE",
+                                prescribedBy:
+                                    typeof currentAppointment?.doctor?.user?.name === "string" && currentAppointment.doctor.user.name.trim().length > 0
+                                        ? `Dr. ${currentAppointment.doctor.user.name.trim()}`
+                                        : null,
+                                medicineStrength: draft.strength,
+                                medicineForm: draft.form,
+                                doctor: currentAppointment?.doctor ? { user: { name: currentAppointment.doctor.user?.name || null } } : null,
+                            })),
+                        ],
+                    }
+                    : prev?.patient,
             }));
+            setMedicationDraftSelections([]);
             setIsFinalizeDialogOpen(false);
 
             toast({
@@ -1634,7 +1742,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         } finally {
             setIsFinalizingSession(false);
         }
-    }, [currentAppointment.id, loadFinalizeChecklist, toast]);
+    }, [currentAppointment.doctor, currentAppointment.id, loadFinalizeChecklist, medicationDraftSelections, toast]);
 
     const handleSaveSpeakerReview = React.useCallback(async () => {
         const cleanedMapping = Object.fromEntries(
@@ -1695,11 +1803,21 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             patientLinked: hasLinkedPatient,
             transcriptReady: isTranscriptReadyForNote,
             noteReady: isTranscriptReadyForNote && hasGeneratedNoteCheckpoint,
+            medicationPrescribed: medicationDraftSelections.length > 0,
         }),
-        [hasGeneratedNoteCheckpoint, hasLinkedPatient, isTranscriptReadyForNote],
+        [hasGeneratedNoteCheckpoint, hasLinkedPatient, isTranscriptReadyForNote, medicationDraftSelections.length],
     );
     const isSessionFinalized = currentAppointment.status === "COMPLETED";
-    const finalizeChecklist = finalizeChecklistResult?.checklist ?? localFinalizeChecklist;
+    const finalizeChecklist = React.useMemo(
+        () => ({
+            patientLinked: (finalizeChecklistResult?.checklist.patientLinked ?? false) || localFinalizeChecklist.patientLinked,
+            transcriptReady: (finalizeChecklistResult?.checklist.transcriptReady ?? false) || localFinalizeChecklist.transcriptReady,
+            noteReady: (finalizeChecklistResult?.checklist.noteReady ?? false) || localFinalizeChecklist.noteReady,
+            medicationPrescribed:
+                (finalizeChecklistResult?.checklist.medicationPrescribed ?? false) || localFinalizeChecklist.medicationPrescribed,
+        }),
+        [finalizeChecklistResult?.checklist, localFinalizeChecklist],
+    );
     const finalizeBlockersByKey = React.useMemo(
         () =>
             new Map(
@@ -1711,11 +1829,15 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         [finalizeChecklistResult?.blockers],
     );
     const canFinalizeSession = isSessionFinalized
-        || (finalizeChecklistResult?.canFinalize
-            ?? (finalizeChecklist.patientLinked && finalizeChecklist.transcriptReady && finalizeChecklist.noteReady));
+        || (
+            finalizeChecklist.patientLinked
+            && finalizeChecklist.transcriptReady
+            && finalizeChecklist.noteReady
+            && finalizeChecklist.medicationPrescribed
+        );
 
     const finalizeTasks: Array<{
-        key: "patientLinked" | "transcriptReady" | "noteReady";
+        key: "patientLinked" | "transcriptReady" | "noteReady" | "medicationPrescribed";
         label: string;
         description: string;
         complete: boolean;
@@ -1750,6 +1872,15 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                         : "Click Generate in the Note tab, then review the generated note."),
                 complete: finalizeChecklist.noteReady,
             },
+            {
+                key: "medicationPrescribed",
+                label: "Medication prescribed",
+                description: finalizeChecklist.medicationPrescribed
+                    ? "At least one medication is staged for this session."
+                    : finalizeBlockersByKey.get("medicationPrescribed")?.description
+                    || "Add at least one medication in the Medication tab before finalizing.",
+                complete: finalizeChecklist.medicationPrescribed,
+            },
         ];
     const finalizeTrackingTasks = React.useMemo(
         () => finalizeTasks.map((task) => ({
@@ -1761,6 +1892,10 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const isMainPanelBusy = isPanelRendering
         || (activeMainTab === "transcript" && isLiveConnecting)
         || (activeMainTab === "note" && (isLoadingNoteTemplates || isGeneratingNote || isSavingNote));
+
+    const openMedicationCatalog = React.useCallback(() => {
+        window.dispatchEvent(new Event("clinical-session:open-medication-catalog"));
+    }, []);
 
     const loadPatientMetricCatalog = React.useCallback(async () => {
         if (!currentAppointment?.id || !currentAppointment?.patient?.user?.id) {
@@ -1960,6 +2095,123 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         }
     }, [chatRuntime, handleMetricChatRequestHandled, pendingMetricChatRequest]);
 
+    React.useEffect(() => {
+        const activeDraftIds = new Set(medicationDraftSelections.map((draft) => draft.draftId));
+        setMedicationSafetyByDraftId((current) => {
+            const nextEntries = Object.entries(current).filter(([draftId]) => activeDraftIds.has(draftId));
+            if (nextEntries.length === Object.keys(current).length) {
+                return current;
+            }
+            return Object.fromEntries(nextEntries);
+        });
+    }, [medicationDraftSelections]);
+
+    const handleAskShifaMedicationSafety = React.useCallback(async () => {
+        if (!hasLinkedPatient) {
+            toast({
+                title: "Patient required",
+                description: "Link a patient before running medication safety review.",
+                variant: "destructive",
+            });
+            return;
+        }
+
+        if (medicationDraftSelections.length === 0) {
+            toast({
+                title: "No medications staged",
+                description: "Add at least one medication before asking Shifa to review safety.",
+                variant: "destructive",
+            });
+            return;
+        }
+
+        const safetyDrafts: MedicationSafetyReviewDraft[] = medicationDraftSelections.map((draft) => ({
+            draftId: draft.draftId,
+            drugName: draft.medication.drugName,
+            queryDrug: deriveMedicationQueryDrug(draft),
+            strength: draft.medication.strength,
+            form: draft.medication.form,
+            indication: draft.medication.indication,
+            durationWeeks: draft.durationWeeks,
+            scheduleCounts: draft.scheduleCounts,
+        }));
+
+        setIsChatPanelOpen(true);
+
+        try {
+            chatRuntime.thread.append({
+                role: "user",
+                content: [{
+                    type: "text",
+                    text: buildMedicationSafetyPrompt({
+                        appointmentReason: currentAppointment.reason || "Not specified",
+                        noteText: generatedNoteText,
+                        drafts: safetyDrafts,
+                    }),
+                }],
+                startRun: true,
+            });
+        } catch (error) {
+            console.error("Failed to append medication safety prompt", error);
+        }
+
+        setIsMedicationSafetyReviewRunning(true);
+        try {
+            const response = await fetch("/api/medication-safety", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    appointmentId: currentAppointment.id,
+                    drafts: safetyDrafts,
+                }),
+            });
+
+            const result = (await response.json().catch(() => null)) as
+                | { success: boolean; error?: string; results?: MedicationSafetyReviewItemResult[] }
+                | null;
+
+            if (!response.ok || !result?.success || !Array.isArray(result.results)) {
+                throw new Error(result?.error || "Medication safety review failed.");
+            }
+
+            setMedicationSafetyByDraftId(
+                Object.fromEntries(result.results.map((item) => [item.draftId, item])),
+            );
+
+            const warningCount = result.results.filter((item) => item.status === "warning").length;
+            const safeCount = result.results.filter((item) => item.status === "safe").length;
+            const cautionCount = result.results.filter((item) => item.status === "caution").length;
+
+            toast({
+                title: "Shifa review complete",
+                description:
+                    warningCount > 0
+                        ? `${warningCount} medication${warningCount > 1 ? "s" : ""} flagged, ${safeCount} safe${cautionCount > 0 ? `, ${cautionCount} unresolved` : ""}.`
+                        : cautionCount > 0
+                        ? `${safeCount} safe, ${cautionCount} unresolved.`
+                        : `All ${safeCount} staged medication${safeCount === 1 ? "" : "s"} passed the graph safety check.`,
+            });
+        } catch (error) {
+            toast({
+                title: "Shifa review failed",
+                description: error instanceof Error ? error.message : "Could not complete medication safety review.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsMedicationSafetyReviewRunning(false);
+        }
+    }, [
+        chatRuntime,
+        currentAppointment.id,
+        currentAppointment.reason,
+        generatedNoteText,
+        hasLinkedPatient,
+        medicationDraftSelections,
+        toast,
+    ]);
+
     return (
         <div ref={rootContainerRef} className="relative flex h-[calc(100svh-3rem)] overflow-hidden bg-background">
             <div className="min-w-0 flex flex-1 flex-col">
@@ -2108,6 +2360,12 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                             <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
                                                 <PenLine className="h-4 w-4 text-muted-foreground" />
                                                 <span>Template Note</span>
+                                            </div>
+                                        )}
+                                        {activeMainTab === "medication" && (
+                                            <div className="flex items-center gap-1.5 px-1 text-sm text-muted-foreground">
+                                                <Pill className="h-4 w-4 text-muted-foreground" />
+                                                <span>Medication</span>
                                             </div>
                                         )}
                                     </div>
@@ -2284,10 +2542,82 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                 )}
                                             </div>
                                         )}
+
+                                        {activeMainTab === "medication" && (
+                                            <div className="flex items-center gap-2">
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    className="h-8 gap-2"
+                                                    disabled={!hasLinkedPatient}
+                                                    onClick={openMedicationCatalog}
+                                                    title={hasLinkedPatient ? "Add medication" : "Link a patient before adding medication"}
+                                                >
+                                                    <Plus className="h-4 w-4" />
+                                                    Add Medication
+                                                </Button>
+
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-8 gap-2"
+                                                    disabled={!hasLinkedPatient || medicationDraftSelections.length === 0 || isMedicationSafetyReviewRunning}
+                                                    onClick={() => {
+                                                        void handleAskShifaMedicationSafety();
+                                                    }}
+                                                    title={!hasLinkedPatient
+                                                        ? "Link a patient before asking Shifa"
+                                                        : medicationDraftSelections.length === 0
+                                                        ? "Stage medications before asking Shifa"
+                                                        : "Run medication safety review with Shifa"}
+                                                >
+                                                    {isMedicationSafetyReviewRunning ? (
+                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                    ) : (
+                                                        <MessageSquare className="h-4 w-4" />
+                                                    )}
+                                                    Ask Shifa
+                                                </Button>
+
+                                                <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="h-8 w-8 rounded-sm text-muted-foreground"
+                                                    disabled
+                                                    title="Preview medication chit"
+                                                >
+                                                    <FileText className="h-4 w-4" />
+                                                </Button>
+
+                                                <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="h-8 w-8 rounded-sm text-muted-foreground"
+                                                    disabled
+                                                    title="Save medications"
+                                                >
+                                                    <Save className="h-4 w-4" />
+                                                </Button>
+
+                                                <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    variant="ghost"
+                                                    className="h-8 w-8 rounded-sm text-muted-foreground"
+                                                    disabled
+                                                    title="Download medication PDF"
+                                                >
+                                                    <Download className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
-                                <div className={`relative flex-1 min-h-0 p-4 ${activeMainTab === "note" ? "bg-white" : "bg-white/50 dark:bg-black/20"}`}>
+                                <div className={`relative flex-1 min-h-0 p-4 ${(activeMainTab === "note" || activeMainTab === "medication") ? "bg-white" : "bg-white/50 dark:bg-black/20"}`}>
                                     {isMainPanelBusy && (
                                         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-white">
                                             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -2417,7 +2747,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                 )}
                                             </div>
                                         </div>
-                                    ) : (
+                                    ) : activeMainTab === "context" ? (
                                         <div className="flex h-full min-h-0 flex-col gap-3 rounded-xl border bg-background/70 p-4">
                                             <div className="flex flex-wrap items-center justify-between gap-2">
                                                 <div className="flex items-center gap-2 text-sm font-medium">
@@ -2500,6 +2830,45 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                 </div>
                                             )}
                                         </div>
+                                    ) : (
+                                        <MedicationTab
+                                            appointmentId={currentAppointment.id}
+                                            hasLinkedPatient={hasLinkedPatient}
+                                            draftSelections={medicationDraftSelections}
+                                            onDraftSelectionsChange={setMedicationDraftSelections}
+                                            safetyReviewByDraftId={medicationSafetyByDraftId}
+                                            isSafetyReviewRunning={isMedicationSafetyReviewRunning}
+                                            currentPrescriptions={
+                                                Array.isArray(currentAppointment.patient?.prescriptions)
+                                                    ? currentAppointment.patient.prescriptions.map((prescription: any) => ({
+                                                        id: String(prescription.id),
+                                                        name: String(prescription.name || ""),
+                                                        dosage: String(prescription.dosage || ""),
+                                                        frequency: String(prescription.frequency || ""),
+                                                        durationWeeks: typeof prescription.durationWeeks === "number" ? prescription.durationWeeks : null,
+                                                        status: String(prescription.status || "ACTIVE"),
+                                                        prescribedBy:
+                                                            typeof prescription.doctor?.user?.name === "string" && prescription.doctor.user.name.trim().length > 0
+                                                                ? `Dr. ${prescription.doctor.user.name.trim()}`
+                                                                : typeof prescription.prescribedBy === "string" && prescription.prescribedBy.trim().length > 0
+                                                                    ? prescription.prescribedBy.trim()
+                                                                    : null,
+                                                        medicineStrength:
+                                                            typeof prescription.medicineStrength === "string" && prescription.medicineStrength.trim().length > 0
+                                                                ? prescription.medicineStrength.trim()
+                                                                : null,
+                                                        medicineForm:
+                                                            typeof prescription.medicineForm === "string" && prescription.medicineForm.trim().length > 0
+                                                                ? prescription.medicineForm.trim()
+                                                                : null,
+                                                        medicineImageUrl:
+                                                            typeof prescription.medicineImageUrl === "string" && prescription.medicineImageUrl.trim().length > 0
+                                                                ? prescription.medicineImageUrl.trim()
+                                                                : null,
+                                                    }))
+                                                    : []
+                                            }
+                                        />
                                     )}
                                 </div>
 
@@ -2519,12 +2888,12 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                     {finalizeTrackingTasks.map((task, index) => (
                                         <React.Fragment key={task.key}>
                                             {index > 0 && (
-                                                <div className={`mx-1 h-px w-6 ${task.complete ? "bg-emerald-300" : "bg-red-300"}`} />
+                                                <div className={`mx-1 h-px w-4 ${task.complete ? "bg-emerald-300" : "bg-red-300"}`} />
                                             )}
 
                                             <button
                                                 type="button"
-                                                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${task.complete
+                                                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors xl:gap-2 xl:px-3 xl:text-xs ${task.complete
                                                     ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
                                                     : "border-red-200 bg-red-50 text-red-800 hover:bg-red-100"}`}
                                                 disabled={isSessionFinalized}
@@ -2536,7 +2905,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                 title={task.description}
                                                 aria-label={`${task.label}: ${task.complete ? "complete" : "incomplete"}`}
                                             >
-                                                <span className={`h-2.5 w-2.5 rounded-full ${task.complete ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
+                                                <span className={`h-2 w-2 rounded-full ${task.complete ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
                                                 {task.label}
                                             </button>
                                         </React.Fragment>
@@ -2895,36 +3264,6 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                         </div>
                     ) : (
                         <div className="space-y-3">
-                            <div className="overflow-x-auto rounded-lg border bg-muted/20 p-3">
-                                <div className="inline-flex min-w-max items-center">
-                                    {finalizeTrackingTasks.map((task, index) => (
-                                        <React.Fragment key={task.key}>
-                                            {index > 0 && (
-                                                <div className={`mx-1 h-px w-6 ${task.complete ? "bg-emerald-300" : "bg-red-300"}`} />
-                                            )}
-
-                                            <button
-                                                type="button"
-                                                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${task.complete
-                                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
-                                                    : "border-red-200 bg-red-50 text-red-800 hover:bg-red-100"}`}
-                                                disabled={isSessionFinalized}
-                                                onClick={() => {
-                                                    if (!isSessionFinalized) {
-                                                        handleFinalizeTaskAction(task.key);
-                                                    }
-                                                }}
-                                                title={task.description}
-                                                aria-label={`${task.label}: ${task.complete ? "complete" : "incomplete"}`}
-                                            >
-                                                <span className={`h-2.5 w-2.5 rounded-full ${task.complete ? "bg-emerald-500" : "bg-red-500"}`} aria-hidden="true" />
-                                                {task.label}
-                                            </button>
-                                        </React.Fragment>
-                                    ))}
-                                </div>
-                            </div>
-
                             {finalizeTasks.map((task) => (
                                 <div key={task.key} className="rounded-lg border p-3">
                                     <div className="flex items-start justify-between gap-3">

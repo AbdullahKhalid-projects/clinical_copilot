@@ -4,6 +4,10 @@ import { Pool } from 'pg'
 import dns from 'dns'
 
 const connectionString = process.env.DATABASE_URL!
+const normalizedConnectionString = connectionString
+  .replace('sslmode=prefer', 'sslmode=verify-full')
+  .replace('sslmode=require', 'sslmode=verify-full')
+  .replace('sslmode=verify-ca', 'sslmode=verify-full')
 
 // Neon (and some other cloud Postgres providers) return AAAA (IPv6) records that
 // can be unreachable from certain networks. Node.js v22 defaults to trying IPv6
@@ -24,7 +28,7 @@ dns.lookup = function (
   return originalLookup(hostname, options, callback)
 }
 
-const pool = new Pool({ connectionString })
+const pool = new Pool({ connectionString: normalizedConnectionString })
 const adapter = new PrismaPg(pool)
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient }

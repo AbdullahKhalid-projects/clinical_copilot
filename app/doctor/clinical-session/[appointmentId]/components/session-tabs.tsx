@@ -1,9 +1,9 @@
 "use client";
 
-import { AudioLines, Mic, PenLine, SlidersHorizontal } from "lucide-react";
+import { AudioLines, PenLine, Pill, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export type ClinicalSessionTab = "context" | "transcript" | "note";
+export type ClinicalSessionTab = "context" | "transcript" | "note" | "medication";
 
 type SessionTabsProps = {
   activeTab: ClinicalSessionTab;
@@ -41,6 +41,16 @@ export function SessionTabs({ activeTab, onTabChange }: SessionTabsProps) {
       >
         <PenLine className={activeTab === "note" ? "h-4 w-4 text-blue-600" : "h-4 w-4 text-muted-foreground group-hover:text-blue-500"} />
         Note
+      </Button>
+      <div className="h-6 w-px bg-border/70" />
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={() => onTabChange("medication")}
+        className={`group rounded-lg px-3 h-9 border transition-colors ${activeTab === "medication" ? "bg-muted text-foreground border-transparent" : "text-foreground border-transparent hover:bg-muted"}`}
+      >
+        <Pill className={activeTab === "medication" ? "h-4 w-4 text-rose-600" : "h-4 w-4 text-muted-foreground group-hover:text-rose-500"} />
+        Medication
       </Button>
     </div>
   );

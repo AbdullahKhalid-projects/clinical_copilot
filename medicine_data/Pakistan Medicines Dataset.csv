@@ -1,0 +1,99 @@
+Drug Name,Manufacturer,Strength,Form,Indication,Side Effects,Available In,Age Restriction,Prescription Required,Price
+Panadol,GSK,500mg  ,Tablet,"Fever, mild pain",Liver damage (high dose),All cities,None,No,35
+Arinac Forte,Abott,400mg + 60mg  ,Tablet,"Cold, flu, fever, nasal congestion"," Nausea, dizziness, dry mouth etc",All cities,12+,Yes,NaN
+Arinac,Abbott,200mg + 30mg  ,N/A,"Cold, flu, nasal congestion","Drowsiness, high BP",All cities,12+,Yes,65
+OMC-D,Sami Pharma,20mg  ,Tablet,"Acidity, gastric issues","Headache, diarrhea",All cities,12+,Yes,100
+Paracetamol,Various,500mg  ,Tablet,"Fever, pain",Liver issues (overdose),All cities,None,No,30
+Calpol,GSK,500mg,Tablet,Fever and pain in children,Rare skin rash,All cities,0+,No,NaN
+Brufen,Abbott,400mg  ,Tablet,"Pain, inflammation",Stomach upset,All cities,12+,No,70
+Azomax,Pfizer,500mg  ,Tablet,"Infections (respiratory, skin)","Diarrhea, nausea",All cities,12+,Yes,500
+Amoxil,GSK,500mg  ,Capsule,Bacterial infections,"Nausea, allergy",All cities,All ages,Yes,150
+Disprol,Various,500mg  ,Tablet,"Fever, pain","Rash, allergy",All cities,None,No,40
+Augmentin,GSK,625mg  ,Tablet,Strong bacterial infections,"Diarrhea, nausea",All cities,12+,Yes,600
+Flagyl,Pfizer,400mg  ,Tablet,Stomach & intestinal infections,"Metallic taste, nausea",All cities,12+,Yes,80
+Rigix,AGP,10mg  ,N/A,"Allergy, sneezing",Drowsiness,All cities,6+,No,50
+Tamsol D,Himont,0.4mg + 0.5mg  ,Tablet,Prostate enlargement,"Dizziness, low BP",All cities,18+,Yes,200
+Gravinate,Platinum Pharma,50mg  ,Tablet,"Nausea, vomiting, motion sickness",Drowsiness,All cities,6+,No,50
+Panadol Extra,GSK,500mg + 65mg  ,N/A,"Headache, fatigue pain","Liver issues, jitteriness",All cities,12+,No,70
+Panadol Extend,GSK,665mg  ,N/A,Long-lasting pain relief,Liver damage (high dose),All cities,12+,No,100
+Disprin,Various,300mg  ,N/A,"Headache, blood thinner",Stomach bleeding,All cities,16+,No,30
+Risek,Getz Pharma,20mg  ,N/A,"Acidity, ulcers","Headache, stomach pain",All cities,12+,Yes,100
+ORS Sachets,Various,N/A  ,Oral Powder,Dehydration,None,All cities,All ages,No,NaN
+Ventolin,GSK,"4mg
+",Inhaler,"Asthma, breathing issues","Tremors, fast heartbeat",All cities,5+,Yes,NaN
+Ponstan,Pfizer,250mg  ,N/A,"Cramps, toothache","Nausea, headache",All cities,12+,Yes,20
+Nuberol Forte,Sami Pharma,450mg + 35mg  ,N/A,N/A,Drowsiness,All cities,18+,Yes,55
+Hydryllin,Searle,N/A  ,,"Cough, congestion",Drowsiness,All cities,2+,No,65
+Losec,AstraZeneca,20mg  ,N/A,"GERD, ulcers","Constipation, headache",All cities,12+,Yes,45
+Cetamol Cold,GSK,500mg + 30mg  ,Tablet,"Cold, fever, body aches","Drowsiness, dry mouth",All cities,12+,No,25
+Cetirizine,AGP,10mg  ,Tablet,"Allergy, sneezing","Drowsiness, dizziness",All cities,6+,No,35
+Actifed,GSK,N/A  ,,"Cold, runny nose, cough","Drowsiness, dry mouth",All cities,2+,No,40
+Piriton,GSK,N/A  ,Tablet,"Allergies, flu symptoms",Drowsiness,All cities,1+,No,60
+Naproxen,Bosch,250mg  ,Tablet,"Joint pain, cramps","Nausea, dizziness",All cities,12+,Yes,15
+Celebrex,Pfizer,200mg  ,Capsule,"Arthritis, back pain",Stomach issues,All cities,18+,Yes,NaN
+Cefspan,Searle,400mg  ,Tablet,"Throat, ear, sinus infections","Diarrhea, rash",All cities,All ages,Yes,NaN
+Levoflox,Getz,500mg  ,Tablet,Urinary & respiratory infections,"Dizziness, nausea",All cities,16+,Yes,NaN
+Erythrocin,Bosch,250mg  ,Tablet,Skin & respiratory infections,"Nausea, cramps",All cities,All ages,Yes,50
+Montiget,Getz Pharma,10mg  ,Tablet,"Allergy, asthma","Headache, abdominal pain",All cities,6+,Yes,NaN
+Zyrtec,UCB,10mg  ,Tablet,"Allergy, runny nose","Drowsiness, dry mouth",All cities,6+,No,NaN
+Telfast,Sanofi,120mg  ,Tablet,Seasonal allergies,"Dry mouth, headache",All cities,12+,No,NaN
+Histac,AGP,10mg  ,Tablet,"Allergy, skin rash",Drowsiness,All cities,6+,No,8
+Coughnil,Sami Pharma,N/A  ,,"Cough, throat irritation",Drowsiness,All cities,2+,No,35
+Broxol,Searle,N/A  ,,Cough with mucus,Stomach upset,All cities,2+,No,20
+Benylin,Janssen,N/A  ,,"Flu, dry cough","Drowsiness, dizziness",All cities,2+,No,55
+Claritek,Getz Pharma,500mg  ,Tablet,"Throat, lung infections","Nausea, diarrhea",All cities,All ages,Yes,65
+Ibuprofen (Children),Abbott,N/A  ,,N/A,Stomach upset,All cities,0+,No,45
+Mucosolvan,Boehringer,N/A  ,,Chest congestion,"Nausea, diarrhea",All cities,2+,No,25
+Cetirizine,Getz Pharma,10mg  ,Tablet,"Allergy, cold, sneezing","Drowsiness, dry mouth",All cities,6+,No,35
+Montiget,Getz Pharma,10mg  ,Tablet,"Allergic rhinitis, asthma","Headache, abdominal pain",All cities,6+,Yes,40
+Zentel,GSK,400mg  ,Tablet,Worm infestation,"Abdominal pain, nausea",All cities,2+,No,60
+Erythrocin,Abbot,250mg  ,Tablet,Bacterial infection,"Nausea, stomach upset",All cities,6+,Yes,15
+Betnovate,GSK,N/A  ,Cream,"Skin allergies, eczema","Burning, thinning skin",All cities,All ages,Yes,NaN
+Daktarin,Janssen,N/A  ,Cream,Fungal infections,"Irritation, redness",All cities,All ages,Yes,NaN
+Ciproxin,Bayer,500mg  ,Tablet,Urinary and GI infections,"Nausea, dizziness",All cities,18+,Yes,NaN
+Rivotril,Roche,0.5mg  ,Tablet,"Anxiety, seizures","Drowsiness, dependency risk",All cities,18+,Yes,NaN
+Neurobion,Merck,N/A  ,Injection/Vitamin,B12 & nerve pain,Injection site pain,All cities,12+,No,NaN
+Entamizole,Searle,400mg + 500mg  ,Tablet,"Amoebiasis, GI infection","Metallic taste, nausea",All cities,All ages,Yes,NaN
+Telfast,Tabros Pharma,120mg  ,Tablet,Seasonal allergies,"Headache, fatigue",All cities,12+,Yes,NaN
+Lomotil,Jonas Pharma,2.5mg  ,Tablet,Diarrhea,"Dry mouth, constipation",All cities,16+,Yes,NaN
+Zantac,GSK,150mg  ,N/A,"Acid reflux, ulcers","Constipation, headache",All cities,12+,Yes,NaN
+Imodium,Janssen,2mg  ,Tablet,Diarrhea,"Drowsiness, dry mouth",All cities,12+,No,NaN
+Spasfon,PharmEvo,80mg  ,Tablet,Abdominal cramps,"Nausea, dizziness",All cities,12+,Yes,NaN
+Clarinase Repetabs,MSD,5mg + 120mg  ,Tablet,"Cold, sinus","Insomnia, dry mouth",All cities,12+,Yes,90
+Histazine,Hilton Pharma,10mg  ,Tablet,"Allergy, flu",Drowsiness,All cities,2+,No,80
+Myteka,Getz Pharma,10mg  ,Tablet,"Asthma, allergy","Headache, behavior change",All cities,6+,Yes,85
+Caviplex,ATCO Pharma,N/A  ,Tablet,Multivitamin supplement,Nausea (rare),All cities,All ages,No,100
+Volini Gel,Reckitt,1% Diclofenac  ,Gel,"Muscle pain, sprain",Skin irritation,All cities,12+,No,90
+Metrogyl Gel,Unexo,2% Metronidazole  ,Gel,"Acne, skin infection",Burning sensation,All cities,12+,Yes,70
+Silverex Gel,Maxitech Pharma,1% Silver Sulfadiazine  ,Gel,"Burns, wounds",Skin dryness,All cities,All ages,Yes,110
+Dologel,Macleods,2% Lidocaine + 0.1% Benzalkonium + 1% Choline Salicylate  ,Gel,"Mouth ulcers, oral pain",Temporary numbness,All cities,5+,No,95
+Fastum Gel,Menarini,2.5% Ketoprofen  ,Gel,Joint/muscle pain,"Redness, itching",All cities,18+,No,90
+Volini Gel,Reckitt Benckiser,1% Diclofenac  ,Gel,Muscle & joint pain,"Redness, irritation",All cities,12+,No,85
+Moov Gel,Reckitt Benckiser,1.16% Diclofenac  ,N/A,"Back pain, sprain","Warmth, rash",All cities,12+,No,150
+Iodex Ultra Gel,GSK,5% Iodine Complex  ,Gel,Joint/muscle relief,"Burning, redness",All cities,12+,No,75
+Fastum Gel,Menarini,2.5% Ketoprofen  ,Gel,"Inflammation, pain","Itching, dryness",All cities,12+,Yes,95
+Dicloran Gel,Sami Pharma,1% Diclofenac  ,Gel,"Arthritis, pain","Peeling, redness",All cities,12+,Yes,100
+Silverex Gel,Maxitech Pharma,1% Silver Sulfadiazine  ,Gel,"Burns, wounds","Dryness, irritation",All cities,All ages,No,110
+Burnol Gel,Dr. Morepen,0.2% Nitrofurazone + 0.5% Chlorhexidine  ,Gel,Minor burns,"Stinging, yellow stain",All cities,All ages,No,95
+Neosporin Ointment,GSK,5000 IU Bacitracin + 3.5 mg Neomycin  ,Ointment,Infected cuts/allergy,"Allergy, itching",All cities,All ages,No,125
+Metrogyl Gel,Abbott,2% Metronidazole  ,Gel,"Acne, rosacea","Burning, itching",All cities,12+,Yes,140
+Daktarin Gel,Janssen Pharma,2% Miconazole Nitrate  ,Gel,Fungal infections,Stinging,All cities,All ages,No,130
+Betnovate-N Gel,GSK,0.1% Betamethasone + 0.5% Neomycin  ,Gel,"Eczema, psoriasis",Skin thinning,All cities,12+,Yes,250
+Refresh Eye Gel,Allergan,0.3% Carboxymethylcellulose  ,N/A,"Eye dryness, strain","Burning, blurred vision",All cities,5+,No,180
+Zytee Gel,Shield,8% Choline Salicylate + 2% Lidocaine  ,Gel,"Mouth ulcers, gum pain","Burning, numbness",All cities,5+,No,170
+Polyfax Skin Ointment,GlaxoSmithKline,500 IU Polymyxin B + 5 mg Bacitracin  ,Ointment (Blue),Bacterial skin infections,"Itching, redness",All cities,All ages,Yes,160
+Polyfax Eye Ointment,GlaxoSmithKline,500 IU Polymyxin B + 5 mg Bacitracin  ,Ophthalmic Ointment,Bacterial eye infections,Temporary blurred vision,All cities,All ages,Yes,120
+Bactroban,Mupri Pharma,2% Mupirocin  ,Gel,Bacterial skin infections,"Itching, burning",All cities,All ages,Yes,110
+Soframycin,Franco-Indian Pharma,1% Framycetin  ,Gel,"Wound healing, cuts","Allergy, redness",All cities,All ages,No,190
+Dermovate,Novo Nordisk,0.05% Clobetasol Propionate  ,Gel,"Severe eczema, psoriasis","Skin thinning, redness",All cities,12+,Yes,60
+Lamisil Gel,NOVARTIS,1% Terbinafine  ,Gel,Fungal infections,"Peeling, dryness",All cities,12+,Yes,100
+Canesten,Bayer,1% Clotrimazole  ,Gel,Vaginal/skin fungal infections,Irritation,All cities,12+,No,130
+Finac Gel,Hilton Pharma,0.1% Tretinoin  ,N/A,Male pattern hair loss,"Itching, dry scalp",All cities,18+,Yes,250
+Zindaclin Gel,GSK,1% Clindamycin  ,Gel,Acne vulgaris,"Dry skin, peeling",All cities,12+,Yes,180
+Retin-A Gel,Janssen,0.025% Tretinoin  ,Gel,"Acne, anti-aging","Redness, peeling",All cities,12+,Yes,170
+Emla Gel,AstraZeneca,2.5% Lidocaine + 2.5% Prilocaine  ,N/A,Skin numbing for procedures,"Burning, numbness",All cities,12+,Yes,160
+Voveran Emulgel,Novartis,1.16% Diclofenac Diethylamine  ,Gel,Joint/muscle inflammation,Skin irritation,All cities,12+,No,120
+Terbinafine Gel,Sami Pharma,1% Terbinafine  ,Gel,Skin fungal infection,"Rash, dryness",All cities,12+,Yes,110
+Aczone Gel,Ali Gohar Pharma,5% Dapsone  ,Gel,Acne vulgaris,"Itching, burning",All cities,12+,Yes,190
+Aloe Vera Gel,Pure Leaf,N/A  ,Gel,"Skin moisturizing, sunburn",No major side effects,All cities,All ages,No,60
+Candid-B Cream,Glenmark,1% Clotrimazole + 0.05% Beclomethasone,Gel (Clotrimazole + Beclomethasone),Fungal infections & inflammation,"Skin thinning, irritation",All cities,12+,Yes,100

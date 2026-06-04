@@ -743,6 +743,17 @@ function formatNeo4jPrescriptionSafetyToolOutput(
   result: Neo4jPrescriptionSafetyResult,
 ): string {
   if (!result.ok) {
+    const normalizedError = result.error?.toLowerCase() ?? "";
+    if (normalizedError.includes("no neo4j result rows found")) {
+      return [
+        `Prescription safety verification completed for patient: ${result.patientId}`,
+        `Proposed drug: ${result.proposedDrug}`,
+        `Overall status: GRAPH MATCH NOT FOUND`,
+        "",
+        "The safety graph could not match this compound query term.",
+      ].join("\n");
+    }
+
     return `Failed to verify prescription safety: ${result.error ?? "Unknown Neo4j error."}`;
   }
 

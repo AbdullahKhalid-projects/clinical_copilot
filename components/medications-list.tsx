@@ -37,11 +37,25 @@ interface Medication {
   dosage: string
   frequency: string
   startDate: Date
+  endDate?: Date | null
+  durationWeeks?: number | null
   status: string
   doctorName: string
+  instructions?: string | null
+  medicineStrength?: string | null
+  medicineForm?: string | null
 }
 
 const getTimeSlots = (frequency: string) => {
+  const compactMatch = frequency.match(/^\s*(\d+)\s*-\s*(\d+)\s*-\s*(\d+)\s*$/)
+  if (compactMatch) {
+    return {
+      morning: Number(compactMatch[1] || 0) > 0,
+      afternoon: Number(compactMatch[2] || 0) > 0,
+      evening: Number(compactMatch[3] || 0) > 0,
+    }
+  }
+
   const f = frequency.toLowerCase()
   const slots = {
     morning: false,
@@ -62,9 +76,22 @@ const getTimeSlots = (frequency: string) => {
   return slots
 }
 
+const formatFrequencyLabel = (frequency: string) => {
+  const compactMatch = frequency.match(/^\s*(\d+)\s*-\s*(\d+)\s*-\s*(\d+)\s*$/)
+  if (compactMatch) {
+    return `${compactMatch[1]}-${compactMatch[2]}-${compactMatch[3]}`
+  }
+
+  return frequency
+}
+
 const countActiveSlots = (frequency: string) => {
    const slots = getTimeSlots(frequency)
    return Number(slots.morning) + Number(slots.afternoon) + Number(slots.evening)
+}
+
+const formatMedicationSubtitle = (med: Medication) => {
+  return [med.medicineStrength || med.dosage, med.medicineForm].filter(Boolean).join(" - ")
 }
 
 const slotMeta: Record<"morning" | "afternoon" | "evening", { icon: React.ElementType; className: string; label: string }> = {
@@ -76,7 +103,7 @@ const slotMeta: Record<"morning" | "afternoon" | "evening", { icon: React.Elemen
    afternoon: {
       icon: Sunset,
       className: "bg-orange-100 text-orange-700 border-orange-300 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-800",
-      label: "Evening"
+      label: "Afternoon"
    },
    evening: {
       icon: Moon,
@@ -264,7 +291,9 @@ export default function MedicationsSchedule({ initialMedications }: { initialMed
                                                 </div>
                                              </div>
                                              <div className="flex items-end justify-between gap-2">
-                                                <span className="block text-xs text-muted-foreground truncate opacity-90">{med.dosage}</span>
+                        <span className="block text-xs text-muted-foreground truncate opacity-90">
+                          {med.medicineStrength || med.dosage}
+                        </span>
                                                 <Badge
                                                    variant="secondary"
                                                    className={cn(takenBadgeClass, !isTaken && "opacity-0 pointer-events-none")}
@@ -374,7 +403,9 @@ function MedicationDetailDialog({
                   </div>
                   <div>
                      <DialogTitle className="text-xl">{med.name}</DialogTitle>
-                     <DialogDescription className="text-foreground font-medium">{med.dosage}</DialogDescription>
+                     <DialogDescription className="text-foreground font-medium">
+                        {formatMedicationSubtitle(med)}
+                     </DialogDescription>
                   </div>
                </div>
             </DialogHeader>
@@ -384,7 +415,7 @@ function MedicationDetailDialog({
                <div className="flex items-center gap-2 p-3 bg-muted rounded-lg text-sm">
                   <CalendarIcon className="w-4 h-4 text-muted-foreground" />
                   <span className="font-medium">
-                     {format(day, 'EEEE, MMMM do')} • <span className="capitalize">{slot}</span>
+                     {format(day, "EEEE, MMMM do")} - <span className="capitalize">{slot}</span>
                   </span>
                </div>
 
@@ -394,7 +425,7 @@ function MedicationDetailDialog({
                      <span className="text-muted-foreground text-xs uppercase tracking-wider">Frequency</span>
                      <div className="flex items-center gap-1.5">
                         <Clock className="w-4 h-4 text-primary" />
-                        <span>{med.frequency}</span>
+                        <span>{formatFrequencyLabel(med.frequency)}</span>
                      </div>
                   </div>
                   <div className="space-y-1">
@@ -404,13 +435,28 @@ function MedicationDetailDialog({
                         <span className="truncate" title={med.doctorName}>{med.doctorName}</span>
                      </div>
                   </div>
+                  <div className="space-y-1">
+                     <span className="text-muted-foreground text-xs uppercase tracking-wider">Duration</span>
+                     <div className="flex items-center gap-1.5">
+                        <CalendarIcon className="w-4 h-4 text-primary" />
+                        <span>
+                           {typeof med.durationWeeks === "number" ? `${med.durationWeeks} week${med.durationWeeks > 1 ? "s" : ""}` : "Ongoing"}
+                        </span>
+                     </div>
+                  </div>
+                  <div className="space-y-1">
+                     <span className="text-muted-foreground text-xs uppercase tracking-wider">Status</span>
+                     <div className="flex items-center gap-1.5">
+                        <Badge variant="outline" className="bg-background">{med.status}</Badge>
+                     </div>
+                  </div>
                </div>
                
                {/* Status */}
                <div className="space-y-1">
                   <span className="text-muted-foreground text-xs uppercase tracking-wider">Instructions</span>
                   <p className="text-sm bg-accent/50 p-3 rounded-md border text-muted-foreground">
-                     Take this medication with water. Do not skip doses. If you experience dizziness, contact your provider.
+                     {med.instructions?.trim() || "No additional instructions were provided for this prescription."}
                   </p>
                </div>
             </div>
