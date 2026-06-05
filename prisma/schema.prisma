@@ -323,6 +323,11 @@ model MedicineCatalog {
   manufacturer         String?
   strength             String?
   form                 String?
+  genericName          String?
+  activeIngredients    String?        @db.Text
+  primekgQueryTerms    String?        @db.Text
+  matchConfidence      String?
+  mappingNotes         String?        @db.Text
   indication           String?        @db.Text
   sideEffects          String?        @db.Text
   availableIn          String?
@@ -339,6 +344,8 @@ model MedicineCatalog {
 
   @@index([drugName])
   @@index([drugNameNormalized])
+  @@index([genericName])
+  @@index([matchConfidence])
   @@index([source])
 }
 

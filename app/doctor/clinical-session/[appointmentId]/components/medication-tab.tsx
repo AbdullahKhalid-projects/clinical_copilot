@@ -3,6 +3,7 @@
 import * as React from "react";
 import {
   Loader2,
+  MessageSquare,
   Moon,
   Plus,
   ShoppingBag,
@@ -61,6 +62,8 @@ type MedicationTabProps = {
   onDraftSelectionsChange: React.Dispatch<React.SetStateAction<MedicationDraftSelection[]>>;
   safetyReviewByDraftId: Record<string, MedicationSafetyReviewItemResult>;
   isSafetyReviewRunning: boolean;
+  reviewingDraftIds?: string[];
+  onAskShifaForDraft?: (draftId: string) => void;
 };
 
 type MedicationCatalogCard = {
@@ -96,6 +99,33 @@ const DURATION_OPTIONS = [1, 2, 3, 4, 8];
 
 function formatMedicationSubtitle(medication: MedicationCatalogItem): string {
   return [medication.strength, medication.form].filter(Boolean).join(" - ") || "Compound not specified";
+}
+
+function formatMedicationGenericLine(medication: MedicationCatalogItem): string | null {
+  const generic = medication.genericName?.trim() || "";
+  if (!generic) {
+    return null;
+  }
+
+  return generic;
+}
+
+function formatMedicationIngredientLine(medication: MedicationCatalogItem): string | null {
+  if (!Array.isArray(medication.activeIngredients) || medication.activeIngredients.length === 0) {
+    return null;
+  }
+
+  const visible = medication.activeIngredients.slice(0, 2);
+  const suffix =
+    medication.activeIngredients.length > visible.length
+      ? ` +${medication.activeIngredients.length - visible.length} more`
+      : "";
+
+  return `${visible.join(", ")}${suffix}`;
+}
+
+function formatMedicationInsightLine(medication: MedicationCatalogItem): string | null {
+  return formatMedicationGenericLine(medication) ?? formatMedicationIngredientLine(medication);
 }
 
 function inferSlotsFromFrequency(frequency: string): MedicationSlot[] {
@@ -230,11 +260,29 @@ function MedicationCatalogDetailsDialog({
           </DialogHeader>
 
           <div className="mt-5 space-y-4">
-              <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
               <Badge variant="outline">{medication.prescriptionRequired ? "Prescription" : "Over the Counter"}</Badge>
               {medication.ageRestriction ? <Badge variant="outline">{medication.ageRestriction}</Badge> : null}
               {medication.price ? <Badge variant="outline">PKR {medication.price}</Badge> : null}
             </div>
+
+            {formatMedicationGenericLine(medication) ? (
+              <div className="rounded-xl border bg-muted/20 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Generic
+                </div>
+                <p className="mt-2 text-sm text-foreground">{formatMedicationGenericLine(medication)}</p>
+              </div>
+            ) : null}
+
+            {formatMedicationIngredientLine(medication) ? (
+              <div className="rounded-xl border bg-muted/20 p-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Active Ingredients
+                </div>
+                <p className="mt-2 text-sm text-foreground">{formatMedicationIngredientLine(medication)}</p>
+              </div>
+            ) : null}
 
             <div className="grid gap-3">
               <div className="rounded-xl border bg-muted/20 p-3">
@@ -343,6 +391,8 @@ export function MedicationTab({
   onDraftSelectionsChange,
   safetyReviewByDraftId,
   isSafetyReviewRunning,
+  reviewingDraftIds = [],
+  onAskShifaForDraft,
 }: MedicationTabProps) {
   const { toast } = useToast();
   const [isCatalogDialogOpen, setIsCatalogDialogOpen] = React.useState(false);
@@ -444,6 +494,11 @@ export function MedicationTab({
         manufacturer: null,
         strength: prescription.medicineStrength,
         form: prescription.medicineForm,
+        genericName: null,
+        activeIngredients: [],
+        primekgQueryTerms: [],
+        matchConfidence: null,
+        mappingNotes: null,
         indication: null,
         sideEffects: null,
         availableIn: null,
@@ -585,19 +640,23 @@ export function MedicationTab({
                 <div className="space-y-4">
                   {draftSelections.map((draft) => {
                     const safetyReview = safetyReviewByDraftId[draft.draftId];
+                    const isDraftReviewRunning = reviewingDraftIds.includes(draft.draftId);
                     const safetyClasses =
                       safetyReview?.status === "safe"
-                        ? "border-emerald-300 bg-emerald-50/70 shadow-[0_0_0_1px_rgba(52,211,153,0.3),0_0_24px_rgba(16,185,129,0.12)]"
+                        ? "border-emerald-400 bg-emerald-50/90 shadow-[0_0_0_1px_rgba(52,211,153,0.36),0_0_26px_rgba(16,185,129,0.14)]"
                         : safetyReview?.status === "warning"
-                        ? "border-red-300 bg-red-50/80 shadow-[0_0_0_1px_rgba(248,113,113,0.28),0_0_24px_rgba(239,68,68,0.10)]"
+                        ? "border-red-400 bg-red-50/90 shadow-[0_0_0_1px_rgba(248,113,113,0.34),0_0_26px_rgba(239,68,68,0.12)]"
                         : safetyReview?.status === "caution"
-                        ? "border-amber-300 bg-amber-50/80 shadow-[0_0_0_1px_rgba(251,191,36,0.28),0_0_24px_rgba(245,158,11,0.10)]"
-                        : isSafetyReviewRunning
+                        ? "border-amber-400 bg-amber-50/90 shadow-[0_0_0_1px_rgba(251,191,36,0.34),0_0_26px_rgba(245,158,11,0.12)]"
+                        : isDraftReviewRunning
                         ? "border-sky-300 bg-sky-50/70 shadow-[0_0_0_1px_rgba(125,211,252,0.28),0_0_20px_rgba(56,189,248,0.08)]"
                         : "";
 
                     return (
-                    <Card key={draft.draftId} className="relative gap-0 overflow-hidden py-0">
+                    <Card
+                      key={draft.draftId}
+                      className={cn("relative gap-0 overflow-hidden border py-0", safetyClasses)}
+                    >
                       <div className={cn("absolute inset-0 pointer-events-none rounded-[inherit]", safetyClasses)} />
                       <Button
                         type="button"
@@ -615,9 +674,29 @@ export function MedicationTab({
                           <div className="min-w-0">
                             <div className="truncate text-sm font-semibold text-foreground">{draft.medication.drugName}</div>
                             <div className="truncate text-xs text-muted-foreground">{formatMedicationSubtitle(draft.medication)}</div>
+                            {formatMedicationInsightLine(draft.medication) ? (
+                              <div className="truncate text-xs text-muted-foreground/80">
+                                {formatMedicationInsightLine(draft.medication)}
+                              </div>
+                            ) : null}
                           </div>
 
                           <div className="flex shrink-0 items-center gap-2">
+                            {safetyReview ? (
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "capitalize",
+                                  safetyReview.status === "safe"
+                                    ? "border-emerald-300 bg-emerald-100 text-emerald-900"
+                                    : safetyReview.status === "warning"
+                                    ? "border-red-300 bg-red-100 text-red-900"
+                                    : "border-amber-300 bg-amber-100 text-amber-900",
+                                )}
+                              >
+                                {safetyReview.status === "caution" ? "Unresolved" : safetyReview.status}
+                              </Badge>
+                            ) : null}
                             <Badge variant="outline" className="w-fit">{formatScheduleSummary(draft.scheduleCounts)}</Badge>
                             <Select
                               value={String(draft.durationWeeks)}
@@ -641,6 +720,38 @@ export function MedicationTab({
                           value={draft.scheduleCounts}
                           onCycle={(slot) => cycleDraftScheduleCount(draft.draftId, slot)}
                         />
+
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="text-xs text-muted-foreground">
+                            {safetyReview?.status === "warning"
+                              ? "Warnings found for this medication."
+                              : safetyReview?.status === "safe"
+                              ? "No graph safety warnings found."
+                              : safetyReview?.status === "caution"
+                              ? "This medication could not be resolved cleanly."
+                              : "Run Shifa on this medication to check safety."}
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 gap-2"
+                            disabled={!hasLinkedPatient || isDraftReviewRunning || isSafetyReviewRunning}
+                            onClick={() => onAskShifaForDraft?.(draft.draftId)}
+                            title={
+                              !hasLinkedPatient
+                                ? "Link a patient before asking Shifa"
+                                : "Run Shifa for this medication"
+                            }
+                          >
+                            {isDraftReviewRunning ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <MessageSquare className="h-4 w-4" />
+                            )}
+                            Ask Shifa
+                          </Button>
+                        </div>
                       </CardContent>
                     </Card>
                     );
@@ -750,6 +861,11 @@ export function MedicationTab({
                               <div className="break-words text-sm text-muted-foreground">
                                 {formatMedicationSubtitle(medication)}
                               </div>
+                              {formatMedicationInsightLine(medication) ? (
+                                <div className="break-words text-xs font-medium text-foreground/75">
+                                  {formatMedicationInsightLine(medication)}
+                                </div>
+                              ) : null}
                             </div>
 
                             <p className="text-sm leading-6 text-muted-foreground">

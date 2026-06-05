@@ -36,6 +36,29 @@ import {
   TOOL_ROUTING_SYSTEM_PROMPT,
   GREETING_PROMPT,
 } from "@/evals/prompts";
+  executePrimeKgDiseasesForDrugTool,
+  executePrimeKgDrugsForDiseaseTool,
+  executePrimeKgDiseaseContextTool,
+  executePrimeKgDrugContextTool,
+  executePrimeKgEntitySearchTool,
+  executePrimeKgRelatedDiseasesTool,
+  executePrimeKgTargetsForDrugTool,
+  formatPrimeKgDiseasesForDrugToolOutput,
+  formatPrimeKgDrugsForDiseaseToolOutput,
+  formatPrimeKgDiseaseContextToolOutput,
+  formatPrimeKgDrugContextToolOutput,
+  formatPrimeKgEntitySearchToolOutput,
+  formatPrimeKgRelatedDiseasesToolOutput,
+  formatPrimeKgTargetsForDrugToolOutput,
+  type PrimeKgDiseaseContextResult,
+  type PrimeKgDiseasesForDrugResult,
+  type PrimeKgDrugsForDiseaseResult,
+  type PrimeKgDrugContextResult,
+  type PrimeKgEntitySearchResult,
+  type PrimeKgRelatedDiseasesResult,
+  type PrimeKgTargetsForDrugResult,
+} from "@/lib/primekg/tools";
+import { resolveNeo4jPatientGraphId } from "@/lib/neo4j-patient-id";
 
 const SYSTEM_PROMPT = BASE_SYSTEM_PROMPT;
 
@@ -118,6 +141,13 @@ const NEO4J_TOOL_RESULT_MAX_ROWS = Math.max(
 );
 const THINK_OPEN_TAG = "<think>";
 const THINK_CLOSE_TAG = "</think>";
+const PRIMEKG_TAG_REGEX = /(^|\s)#primekg\b/i;
+const PRIMEKG_FOLLOWUP_ACTION_IDS = [
+  "overview",
+  "indications",
+  "contraindications",
+  "targets",
+] as const;
 
 let neo4jDriverSingleton: Driver | null = null;
 
@@ -477,6 +507,14 @@ function getLatestUserQuery(messages: UIMessage[]): string {
   return "";
 }
 
+function hasPrimeKgHint(text: string): boolean {
+  return PRIMEKG_TAG_REGEX.test(text);
+}
+
+function stripPrimeKgHint(text: string): string {
+  return text.replace(PRIMEKG_TAG_REGEX, " ").replace(/\s{2,}/g, " ").trim();
+}
+
 function getConversationContext(messages: UIMessage[]): string {
   const recent = messages
     .slice(-CONVERSATION_CONTEXT_MAX_MESSAGES)
@@ -507,6 +545,7 @@ type ChatContextPayload = {
   patientMetricCatalog?: string[] | null;
   includePatientDocuments?: boolean;
   retrievalMode?: "normal" | "semantic";
+  primeKgMode?: boolean;
 };
 
 const STRUCTURED_TOOL_INTENTS = [
@@ -1160,8 +1199,6 @@ async function resolveNeo4jPatientIdentifier(
   chatContext: ChatContextPayload,
   resolvedPatientUserId: string | null,
 ): Promise<string | null> {
-  const HARD_CODED_NEO4J_PATIENT_ID = "38cc16ef-8b17-4841-985e-bdafe4c92e37";
-
   const candidates: string[] = [];
 
   const addCandidate = (value: string | null | undefined) => {
@@ -1211,16 +1248,18 @@ async function resolveNeo4jPatientIdentifier(
   // Keep this as a final fallback because some graphs use app user IDs as patient keys.
   addCandidate(resolvedPatientUserId);
 
-  const resolved = candidates[0] ?? null;
+  const resolved = resolveNeo4jPatientGraphId({
+    appointmentPatientId: candidates[0] ?? null,
+    patientProfileId: chatContext.patientProfileId ?? null,
+    patientUserId: resolvedPatientUserId,
+  });
   console.info(
     "[Neo4j] Resolved patient identifier candidates:",
     candidates,
     "selected:",
     resolved,
-    "HARD_CODED:",
-    HARD_CODED_NEO4J_PATIENT_ID,
   );
-  return HARD_CODED_NEO4J_PATIENT_ID;
+  return resolved;
 }
 
 async function runStructuredOnlyRetrieval(
@@ -2056,13 +2095,18 @@ export async function POST(request: Request) {
 
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const chatContext = body.chatContext ?? {};
-    const latestUserQuery = getLatestUserQuery(messages);
+    const latestUserQueryRaw = getLatestUserQuery(messages);
+    const primeKgHintActive =
+      chatContext.primeKgMode === true || hasPrimeKgHint(latestUserQueryRaw);
+    const latestUserQuery =
+      stripPrimeKgHint(latestUserQueryRaw) || latestUserQueryRaw;
 
     if (CHAT_DEBUG_LOGS_ENABLED) {
       console.info("Chat request start", {
         requestId,
         hasMessages: messages.length > 0,
         hasLatestUserQuery: latestUserQuery.length > 0,
+        primeKgHintActive,
       });
     }
 
@@ -2170,6 +2214,14 @@ export async function POST(request: Request) {
             "- For patient overviews, allergies, or medication lists, use get_patient_clinical_summary.",
             "- To check a specific drug in a prescribing context, use verify_prescription_safety.",
             "- To find treatment alternatives, use suggest_safe_alternatives.",
+            "- Use get_primekg_drug_context only for general knowledge-graph questions about a specific drug, such as what it is indicated for, what diseases it is contraindicated in, or what proteins/targets it connects to in PrimeKG.",
+            "- Use get_primekg_disease_context only for general knowledge-graph questions about a specific disease, such as what drugs are indicated for it, what drugs are contraindicated, or what related diseases it connects to in PrimeKG.",
+            "- Use search_primekg_entities first when the drug or disease term is fuzzy, partial, misspelled, or ambiguous.",
+            "- Use get_primekg_drugs_for_disease for focused disease-to-treatment lookups.",
+            "- Use get_primekg_diseases_for_drug for focused drug-to-disease lookups.",
+            "- Use get_primekg_targets_for_drug for focused drug target or protein questions.",
+            "- Use get_primekg_related_diseases for focused disease-neighbor or disease-hierarchy questions.",
+            "- If the user includes the tag #primekg, strongly prefer the PrimeKG tools and interpret the question as a general drug/disease knowledge-graph lookup rather than a patient-specific chart or safety lookup.",
             "FINAL OUTPUT RULES:",
             "- Output ONLY the data returned by the tools.",
             "- Use markdown tables for tool-provided history/reports.",
@@ -2268,6 +2320,9 @@ export async function POST(request: Request) {
       prompt: [
         "Clinical question:",
         latestUserQuery,
+        primeKgHintActive
+          ? "Routing hint: the user included #primekg, so prefer PrimeKG knowledge-graph tools for this turn."
+          : "",
         conversationContext ? `Recent chat:\n${conversationContext}` : "",
       ]
         .filter((line) => line.length > 0)
@@ -2485,8 +2540,176 @@ export async function POST(request: Request) {
               ),
             ),
         }),
+        get_primekg_drug_context: tool({
+          description:
+            "Retrieve general biomedical graph context for one explicit drug name from the separate PrimeKG Neo4j instance. Use this for drug knowledge questions like 'what is metformin used for', 'what does prednisone target', or 'what diseases is warfarin contraindicated in'. Expected output includes the matched drug, its indication-linked diseases, contraindication-linked diseases, and drug-protein target/mechanism links. This is not patient-specific and should not be used for allergy or prescribing safety decisions.",
+          inputSchema: z.object({
+            drugName: z
+              .string()
+              .min(1)
+              .describe("Explicit drug name to look up in PrimeKG."),
+          }),
+          execute: async ({ drugName }) =>
+            formatPrimeKgDrugContextToolOutput(
+              await executePrimeKgDrugContextTool({
+                drugName,
+              }),
+            ),
+        }),
+        search_primekg_entities: tool({
+          description:
+            "Search the PrimeKG graph for candidate entity matches when the term is fuzzy, partial, misspelled, or ambiguous. Use this before a focused retrieval tool when you are not fully confident about the exact entity name or whether the term refers to a drug or a disease.",
+          inputSchema: z.object({
+            query: z
+              .string()
+              .min(1)
+              .describe("Drug, disease, or other biomedical term to search."),
+            entityType: z
+              .enum(["any", "drug", "disease", "gene/protein"])
+              .optional()
+              .describe(
+                "Optional entity-type filter. Use any if you are unsure.",
+              ),
+          }),
+          execute: async ({ query, entityType }) =>
+            formatPrimeKgEntitySearchToolOutput(
+              await executePrimeKgEntitySearchTool({
+                query,
+                entityType,
+              }),
+            ),
+        }),
+        get_primekg_drugs_for_disease: tool({
+          description:
+            "Retrieve the indicated drugs for one explicit disease name from PrimeKG. Use this for focused disease-to-treatment questions such as 'what drugs are indicated for asthma' or 'what treatments are linked to psoriasis'.",
+          inputSchema: z.object({
+            diseaseName: z
+              .string()
+              .min(1)
+              .describe("Explicit disease name to look up in PrimeKG."),
+          }),
+          execute: async ({ diseaseName }) =>
+            formatPrimeKgDrugsForDiseaseToolOutput(
+              await executePrimeKgDrugsForDiseaseTool({
+                diseaseName,
+              }),
+            ),
+        }),
+        get_primekg_diseases_for_drug: tool({
+          description:
+            "Retrieve disease links for one explicit drug name from PrimeKG. Use this for focused drug-to-disease questions such as 'what is metformin indicated for', 'what diseases is prednisone contraindicated in', or 'what conditions is warfarin linked to'.",
+          inputSchema: z.object({
+            drugName: z
+              .string()
+              .min(1)
+              .describe("Explicit drug name to look up in PrimeKG."),
+          }),
+          execute: async ({ drugName }) =>
+            formatPrimeKgDiseasesForDrugToolOutput(
+              await executePrimeKgDiseasesForDrugTool({
+                drugName,
+              }),
+            ),
+        }),
+        get_primekg_targets_for_drug: tool({
+          description:
+            "Retrieve protein and target links for one explicit drug name from PrimeKG. Use this for focused target or mechanism questions such as 'what does prednisone target' or 'what proteins are linked to metformin'.",
+          inputSchema: z.object({
+            drugName: z
+              .string()
+              .min(1)
+              .describe("Explicit drug name to look up in PrimeKG."),
+          }),
+          execute: async ({ drugName }) =>
+            formatPrimeKgTargetsForDrugToolOutput(
+              await executePrimeKgTargetsForDrugTool({
+                drugName,
+              }),
+            ),
+        }),
+        get_primekg_disease_context: tool({
+          description:
+            "Retrieve general biomedical graph context for one explicit disease name from the separate PrimeKG Neo4j instance. Use this for disease knowledge questions like 'what drugs are associated with asthma', 'what drugs are contraindicated in heart failure', or 'what diseases are related to psoriasis'. Expected output includes the matched disease, indicated drugs, contraindicated drugs, and disease-disease context links. This is not patient-specific and should not be used for allergy or prescribing safety decisions.",
+          inputSchema: z.object({
+            diseaseName: z
+              .string()
+              .min(1)
+              .describe("Explicit disease name to look up in PrimeKG."),
+          }),
+          execute: async ({ diseaseName }) =>
+            formatPrimeKgDiseaseContextToolOutput(
+              await executePrimeKgDiseaseContextTool({
+                diseaseName,
+              }),
+            ),
+        }),
+        get_primekg_related_diseases: tool({
+          description:
+            "Retrieve related disease links for one explicit disease name from PrimeKG. Use this for focused disease-neighbor questions such as 'what diseases are related to asthma' or 'what diseases are linked to psoriasis'.",
+          inputSchema: z.object({
+            diseaseName: z
+              .string()
+              .min(1)
+              .describe("Explicit disease name to look up in PrimeKG."),
+          }),
+          execute: async ({ diseaseName }) =>
+            formatPrimeKgRelatedDiseasesToolOutput(
+              await executePrimeKgRelatedDiseasesTool({
+                diseaseName,
+              }),
+            ),
+        }),
+        offer_medication_followups: tool({
+          description:
+            "Frontend-only follow-up selector for staged medication reviews. Use this only after completing a safety review for one or more explicit medications already provided in the prompt. Do not ask a plain-text follow-up list. Instead, call this tool with the staged medications so the UI can present PrimeKG next actions like overview, indications, contraindications, and targets.",
+          inputSchema: z.object({
+            title: z
+              .string()
+              .optional()
+              .describe("Optional short heading for the selector UI."),
+            instructions: z
+              .string()
+              .optional()
+              .describe("Optional short helper text for the selector UI."),
+            medications: z
+              .array(
+                z.object({
+                  medicationName: z
+                    .string()
+                    .min(1)
+                    .describe("Doctor-facing medication or brand name."),
+                  queryDrug: z
+                    .string()
+                    .min(1)
+                    .describe(
+                      "Normalized compound query term to use for PrimeKG lookups.",
+                    ),
+                  genericName: z
+                    .string()
+                    .optional()
+                    .describe("Optional generic name for display context."),
+                  activeIngredients: z
+                    .array(z.string().min(1))
+                    .optional()
+                    .describe(
+                      "Optional active ingredients to help the doctor pick the next graph query.",
+                    ),
+                }),
+              )
+              .min(1)
+              .describe(
+                "The staged medications that should receive PrimeKG follow-up options.",
+              ),
+            actions: z
+              .array(z.enum(PRIMEKG_FOLLOWUP_ACTION_IDS))
+              .optional()
+              .describe(
+                "Optional allowed action identifiers. If omitted, the UI will use its default PrimeKG actions.",
+              ),
+          }),
+        }),
       },
-      stopWhen: stepCountIs(5),
+      stopWhen: stepCountIs(7),
       providerOptions: {
         openai: {
           parallelToolCalls: false,
