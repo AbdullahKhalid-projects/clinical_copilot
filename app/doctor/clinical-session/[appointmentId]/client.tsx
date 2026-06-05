@@ -15,7 +15,6 @@ import {
     Download,
     Save,
     Trash,
-    History,
     Mic2,
     Calendar,
     Pause,
@@ -33,7 +32,8 @@ import {
     Link2,
     Upload,
     SlidersHorizontal,
-    Info
+    Info,
+    UserRound
 } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 
@@ -47,6 +47,7 @@ import { SessionTabs, type ClinicalSessionTab } from "./components/session-tabs"
 import { LiveTranscriptPanel } from "./components/live-transcript-panel";
 import { SessionRecordingActions } from "./components/session-recording-actions";
 import { MedicationTab, type MedicationDraftSelection } from "./components/medication-tab";
+import { VisitTimeline } from "./components/visit-timeline";
 import { Thread } from "@/components/thread";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
@@ -98,6 +99,7 @@ import {
     getAppointmentPatientMetricCatalog,
     getAppointmentFinalizeChecklist,
     getDoctorPatientsForLinking,
+    getPatientPreviousAppointments,
     finalizeAppointmentSession,
     linkPatientToAppointment,
     deleteAppointmentSession,
@@ -136,12 +138,11 @@ type MetricChatRequest = {
     metric: string;
 };
 
+const INITIAL_VISIBLE_METRICS = 24;
+
 function buildMedicationSafetyPrompt(args: {
-    appointmentReason: string;
-    noteText: string;
     drafts: MedicationSafetyReviewDraft[];
 }) {
-    const noteContext = args.noteText.trim().slice(0, 1200);
     const medicationLines = args.drafts
         .map((draft, index) => {
             const formula = [draft.strength, draft.form].filter(Boolean).join(" - ") || "Formula not specified";
@@ -169,9 +170,6 @@ function buildMedicationSafetyPrompt(args: {
         "Pass every staged medication into offer_medication_followups using the display medication name, compound query term, generic name if available, and active ingredients if available.",
         "Return one concise visible section per medication with: overall status, allergy conflicts, drug interactions, and contraindications.",
         "If no warnings are found, explicitly say the graph safety check found no warnings.",
-        "",
-        `Appointment reason: ${args.appointmentReason || "Not specified"}`,
-        noteContext ? `Clinical note context:\n${noteContext}` : "Clinical note context: Not available",
         "",
         "Staged medications:",
         medicationLines,
@@ -249,6 +247,27 @@ function formatDateForNoteMetadata(value: unknown): string {
     }
 
     return parsed.toISOString().slice(0, 10);
+}
+
+function formatPatientAge(dateOfBirth: unknown): string | null {
+    if (!dateOfBirth) {
+        return null;
+    }
+
+    const parsed = dateOfBirth instanceof Date ? dateOfBirth : new Date(String(dateOfBirth));
+    if (!isValid(parsed)) {
+        return null;
+    }
+
+    const now = new Date();
+    let age = now.getFullYear() - parsed.getFullYear();
+    const monthDelta = now.getMonth() - parsed.getMonth();
+    const dayDelta = now.getDate() - parsed.getDate();
+    if (monthDelta < 0 || (monthDelta === 0 && dayDelta < 0)) {
+        age -= 1;
+    }
+
+    return age >= 0 ? `${age}y` : null;
 }
 
 function buildAppointmentPatientMetadata(rawAppointment: any): Record<string, unknown> {
@@ -418,6 +437,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [startSignal, setStartSignal] = React.useState(0);
     const [isChatPanelOpen, setIsChatPanelOpen] = React.useState(false);
     const [isChatPanelContentVisible, setIsChatPanelContentVisible] = React.useState(false);
+    const [isChatPanelTransitioning, setIsChatPanelTransitioning] = React.useState(false);
     const [isLiveConnecting, setIsLiveConnecting] = React.useState(false);
     const [isServerWarming, setIsServerWarming] = React.useState(false);
     const [speakerMapping, setSpeakerMapping] = React.useState<Record<string, string>>({});
@@ -457,7 +477,20 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [isMetricCatalogLoading, setIsMetricCatalogLoading] = React.useState(false);
     const [metricCatalogError, setMetricCatalogError] = React.useState<string | null>(null);
     const [metricCatalogSearch, setMetricCatalogSearch] = React.useState("");
+    const [showAllMetrics, setShowAllMetrics] = React.useState(false);
     const [pendingMetricChatRequest, setPendingMetricChatRequest] = React.useState<MetricChatRequest | null>(null);
+    const [previousAppointments, setPreviousAppointments] = React.useState<Array<{
+        id: string;
+        date: Date;
+        status: string;
+        reason: string | null;
+        doctorName: string | null;
+        soapNoteUrl: string | null;
+        transcript: unknown;
+        soapNote: unknown;
+    }>>([]);
+    const [isPreviousAppointmentsLoading, setIsPreviousAppointmentsLoading] = React.useState(false);
+    const [previousAppointmentsError, setPreviousAppointmentsError] = React.useState<string | null>(null);
     const metricChatRequestIdRef = React.useRef(0);
     const hasAutoOpenedFinalizeRef = React.useRef(false);
     const hasMountedPanelRef = React.useRef(false);
@@ -1941,6 +1974,52 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         void loadPatientMetricCatalog();
     }, [loadPatientMetricCatalog]);
 
+    React.useEffect(() => {
+        let cancelled = false;
+
+        if (!hasLinkedPatient) {
+            setPreviousAppointments([]);
+            setPreviousAppointmentsError(null);
+            setIsPreviousAppointmentsLoading(false);
+            return;
+        }
+
+        setIsPreviousAppointmentsLoading(true);
+        setPreviousAppointmentsError(null);
+
+        void getPatientPreviousAppointments(currentAppointment.id, 4)
+            .then((result) => {
+                if (cancelled) {
+                    return;
+                }
+
+                if (!result.success) {
+                    setPreviousAppointments([]);
+                    setPreviousAppointmentsError(result.error || "Could not load previous appointments.");
+                    return;
+                }
+
+                setPreviousAppointments(result.appointments);
+            })
+            .catch((error) => {
+                if (cancelled) {
+                    return;
+                }
+                console.error("Failed to load previous appointments", error);
+                setPreviousAppointments([]);
+                setPreviousAppointmentsError("Could not load previous appointments.");
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setIsPreviousAppointmentsLoading(false);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentAppointment.id, hasLinkedPatient]);
+
     const filteredPatientMetrics = React.useMemo(() => {
         const query = metricCatalogSearch.trim().toLowerCase();
         if (!query) {
@@ -1949,6 +2028,84 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
         return patientMetricCatalog.filter((metric) => metric.includes(query));
     }, [metricCatalogSearch, patientMetricCatalog]);
+
+    const visiblePatientMetrics = React.useMemo(() => {
+        if (metricCatalogSearch.trim().length > 0 || showAllMetrics) {
+            return filteredPatientMetrics;
+        }
+
+        return filteredPatientMetrics.slice(0, INITIAL_VISIBLE_METRICS);
+    }, [filteredPatientMetrics, metricCatalogSearch, showAllMetrics]);
+
+    const hiddenMetricCount = React.useMemo(() => {
+        if (metricCatalogSearch.trim().length > 0 || showAllMetrics) {
+            return 0;
+        }
+
+        return Math.max(filteredPatientMetrics.length - visiblePatientMetrics.length, 0);
+    }, [filteredPatientMetrics.length, metricCatalogSearch, showAllMetrics, visiblePatientMetrics.length]);
+
+    const patientAge = React.useMemo(
+        () => formatPatientAge(currentAppointment.patient?.dateOfBirth),
+        [currentAppointment.patient?.dateOfBirth],
+    );
+    const patientWeight = React.useMemo(() => {
+        const weight = typeof currentAppointment.patient?.weight === "string" ? currentAppointment.patient.weight.trim() : "";
+        return weight.length > 0 ? weight : null;
+    }, [currentAppointment.patient?.weight]);
+    const patientHeight = React.useMemo(() => {
+        const height = typeof currentAppointment.patient?.height === "string" ? currentAppointment.patient.height.trim() : "";
+        return height.length > 0 ? height : null;
+    }, [currentAppointment.patient?.height]);
+
+    const persistedPrescriptionCount = React.useMemo(
+        () => (Array.isArray(currentAppointment.patient?.prescriptions) ? currentAppointment.patient.prescriptions.length : 0),
+        [currentAppointment.patient?.prescriptions],
+    );
+
+    const contextSnapshotCards = React.useMemo(
+        () => [
+            {
+                label: "Linked patient",
+                value: hasLinkedPatient ? patientName : "Not linked",
+                detail: hasLinkedPatient ? `ID ${String(currentAppointment.patient?.id || "").slice(-4) || "n/a"}` : "Link a patient to unlock retrieval",
+                icon: UserRound,
+                tone: hasLinkedPatient ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200",
+            },
+            {
+                label: "Session status",
+                value: statusLabel,
+                detail: appointmentDate ? format(appointmentDate, "MMM d, yyyy • h:mm a") : "Date not available",
+                icon: Clock3,
+                tone: "text-sky-700 bg-sky-50 border-sky-200",
+            },
+            {
+                label: "Age",
+                value: patientAge ?? "Unknown",
+                detail: patientHeight ? `Height ${patientHeight}` : "Date of birth not recorded",
+                icon: Calendar,
+                tone: "text-violet-700 bg-violet-50 border-violet-200",
+            },
+            {
+                label: "Weight",
+                value: patientWeight ?? "Unknown",
+                detail: persistedPrescriptionCount === 1 ? "1 active prescription on chart" : `${persistedPrescriptionCount} active prescriptions on chart`,
+                icon: Pill,
+                tone: "text-rose-700 bg-rose-50 border-rose-200",
+            },
+        ],
+        [
+            appointmentDate,
+            currentAppointment.patient?.id,
+            hasLinkedPatient,
+            patientAge,
+            patientHeight,
+            patientName,
+            persistedPrescriptionCount,
+            patientWeight,
+            statusLabel,
+        ],
+    );
 
     const handleMetricChatRequestHandled = React.useCallback((requestId: number) => {
         setPendingMetricChatRequest((current) => {
@@ -2004,6 +2161,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     };
 
     const handleToggleChatPane = React.useCallback(() => {
+        setIsChatPanelTransitioning(true);
         setIsChatPanelOpen((prev) => !prev);
     }, []);
 
@@ -2021,6 +2179,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
     React.useEffect(() => {
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let transitionTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
         if (isChatPanelOpen) {
             setIsChatPanelContentVisible(false);
@@ -2031,9 +2190,16 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             setIsChatPanelContentVisible(false);
         }
 
+        transitionTimeoutId = setTimeout(() => {
+            setIsChatPanelTransitioning(false);
+        }, CHAT_PANEL_TRANSITION_MS + CHAT_PANEL_CONTENT_FADE_DELAY_MS);
+
         return () => {
             if (timeoutId) {
                 clearTimeout(timeoutId);
+            }
+            if (transitionTimeoutId) {
+                clearTimeout(transitionTimeoutId);
             }
         };
     }, [isChatPanelOpen]);
@@ -2165,8 +2331,6 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                 content: [{
                     type: "text",
                     text: buildMedicationSafetyPrompt({
-                        appointmentReason: currentAppointment.reason || "Not specified",
-                        noteText: generatedNoteText,
                         drafts: safetyDrafts,
                     }),
                 }],
@@ -2309,6 +2473,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
                             <SessionRecordingActions
                                 isUploading={isUploading}
+                                isTranscribing={isBatchTranscribing}
                                 isWarmingUp={isServerWarming}
                                 startSignal={startSignal}
                                 selectedMicrophoneId={selectedMicrophoneId}
@@ -2322,12 +2487,6 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                             />
                         </div>
                         <div className="flex items-center gap-3 justify-end">
-                            {isBatchTranscribing && (
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    Transcribing audio...
-                                </div>
-                            )}
                             {batchTranscriptReady && (
                                 <Button
                                     type="button"
@@ -2593,29 +2752,6 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
 
                                                 <Button
                                                     type="button"
-                                                    size="sm"
-                                                    variant="outline"
-                                                    className="h-8 gap-2"
-                                                    disabled={!hasLinkedPatient || medicationDraftSelections.length === 0 || isMedicationSafetyReviewRunning}
-                                                    onClick={() => {
-                                                        void handleAskShifaMedicationSafety();
-                                                    }}
-                                                    title={!hasLinkedPatient
-                                                        ? "Link a patient before asking Shifa"
-                                                        : medicationDraftSelections.length === 0
-                                                        ? "Stage medications before asking Shifa"
-                                                        : "Run medication safety review with Shifa"}
-                                                >
-                                                    {isMedicationSafetyReviewRunning ? (
-                                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                                    ) : (
-                                                        <MessageSquare className="h-4 w-4" />
-                                                    )}
-                                                    Ask Shifa
-                                                </Button>
-
-                                                <Button
-                                                    type="button"
                                                     size="icon"
                                                     variant="ghost"
                                                     className="h-8 w-8 rounded-sm text-muted-foreground"
@@ -2782,47 +2918,76 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                             </div>
                                         </div>
                                     ) : activeMainTab === "context" ? (
-                                        <div className="flex h-full min-h-0 flex-col gap-3 rounded-xl border bg-background/70 p-4">
-                                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                                <div className="flex items-center gap-2 text-sm font-medium">
-                                                    <Stethoscope className="h-4 w-4 text-muted-foreground" />
-                                                    Patient Normalized Metric Catalog
-                                                </div>
-                                                <div className="flex items-center gap-2">
-                                                    <Badge variant="outline" className="border-border bg-muted/40 text-xs">
-                                                        {patientMetricCatalog.length} metrics
-                                                    </Badge>
-                                                    <Button
-                                                        type="button"
-                                                        variant="outline"
-                                                        size="sm"
-                                                        className="h-8"
-                                                        onClick={() => {
-                                                            void loadPatientMetricCatalog();
-                                                        }}
-                                                        disabled={isMetricCatalogLoading || !hasLinkedPatient}
-                                                    >
-                                                        {isMetricCatalogLoading ? (
-                                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                        ) : (
-                                                            <RotateCcw className="h-3.5 w-3.5" />
-                                                        )}
-                                                        Refresh
-                                                    </Button>
-                                                </div>
+                                        <div className="flex h-full min-h-0 flex-col gap-4 rounded-xl border bg-background/70 p-4">
+                                            <div className="grid gap-3 xl:grid-cols-4">
+                                                {contextSnapshotCards.map((card) => {
+                                                    const Icon = card.icon;
+                                                    return (
+                                                        <div
+                                                            key={card.label}
+                                                            className="rounded-xl border border-border/80 bg-background/85 p-4 shadow-sm"
+                                                        >
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div>
+                                                                    <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                                                                        {card.label}
+                                                                    </p>
+                                                                    <p className="mt-2 text-lg font-semibold text-foreground">
+                                                                        {card.value}
+                                                                    </p>
+                                                                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                                                                        {card.detail}
+                                                                    </p>
+                                                                </div>
+                                                                <div className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl border ${card.tone}`}>
+                                                                    <Icon className="h-4 w-4" />
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
 
-                                            <p className="text-xs text-muted-foreground">
-                                                Patient context will be shown here, including their reports and metrics.
-                                            </p>
+                                            <Separator className="bg-border/70" />
 
-                                            <p className="text-xs text-muted-foreground">
-                                                Chat retrieval maps your question to these normalized SQL metric keys before running structured queries.
-                                            </p>
+                                            <div className="px-1 py-1">
+                                                {!hasLinkedPatient ? (
+                                                    <div className="mt-4 rounded-lg border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+                                                        Link a patient first to see their visit timeline.
+                                                    </div>
+                                                ) : previousAppointmentsError ? (
+                                                    <div className="mt-4 rounded-lg border border-red-200 bg-red-50/50 p-4 text-sm text-red-700">
+                                                        {previousAppointmentsError}
+                                                    </div>
+                                                ) : isPreviousAppointmentsLoading ? (
+                                                    <div className="mt-4 flex items-center rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
+                                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                        Loading previous visits...
+                                                    </div>
+                                                ) : previousAppointments.length === 0 ? (
+                                                    <div className="mt-4 rounded-lg border bg-muted/20 p-4 text-sm text-muted-foreground">
+                                                        No previous visit context was found for this patient yet.
+                                                    </div>
+                                                ) : (
+                                                    <div className="mt-5">
+                                                        <VisitTimeline visits={previousAppointments} />
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <Separator className="bg-border/70" />
 
                                             <Input
                                                 value={metricCatalogSearch}
-                                                onChange={(event) => setMetricCatalogSearch(event.target.value.toLowerCase())}
+                                                onChange={(event) => {
+                                                    const nextValue = event.target.value.toLowerCase();
+                                                    setMetricCatalogSearch(nextValue);
+                                                    if (nextValue.trim().length > 0) {
+                                                        setShowAllMetrics(true);
+                                                    } else {
+                                                        setShowAllMetrics(false);
+                                                    }
+                                                }}
                                                 placeholder="Search normalized metric keys (e.g. hemoglobin, creatinine, dlc)"
                                                 className="h-9 bg-background"
                                                 disabled={!hasLinkedPatient || isMetricCatalogLoading}
@@ -2848,9 +3013,11 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                         : "No metrics matched your search."}
                                                 </div>
                                             ) : (
-                                                <div className="flex-1 min-h-0 overflow-y-auto rounded-lg border bg-background p-3">
+                                                <div
+                                                    className={`flex-1 min-h-0 overflow-y-auto rounded-lg border bg-background p-3 transition-opacity duration-150 ${isChatPanelTransitioning ? "pointer-events-none opacity-0" : "opacity-100"}`}
+                                                >
                                                     <div className="flex flex-wrap gap-2">
-                                                        {filteredPatientMetrics.map((metric) => (
+                                                        {visiblePatientMetrics.map((metric) => (
                                                             <button
                                                                 key={metric}
                                                                 type="button"
@@ -2861,6 +3028,34 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                                             </button>
                                                         ))}
                                                     </div>
+
+                                                    {hiddenMetricCount > 0 ? (
+                                                        <div className="mt-3 border-t border-border/70 pt-3">
+                                                            <Button
+                                                                type="button"
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="h-8 rounded-full px-3 text-xs text-muted-foreground hover:text-foreground"
+                                                                onClick={() => setShowAllMetrics(true)}
+                                                            >
+                                                                <ChevronDown className="mr-1 h-3.5 w-3.5" />
+                                                                Show {hiddenMetricCount} more metrics
+                                                            </Button>
+                                                        </div>
+                                                    ) : showAllMetrics && metricCatalogSearch.trim().length === 0 && filteredPatientMetrics.length > INITIAL_VISIBLE_METRICS ? (
+                                                        <div className="mt-3 border-t border-border/70 pt-3">
+                                                            <Button
+                                                                type="button"
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="h-8 rounded-full px-3 text-xs text-muted-foreground hover:text-foreground"
+                                                                onClick={() => setShowAllMetrics(false)}
+                                                            >
+                                                                <ChevronDown className="mr-1 h-3.5 w-3.5 rotate-180" />
+                                                                Show less
+                                                            </Button>
+                                                        </div>
+                                                    ) : null}
                                                 </div>
                                             )}
                                         </div>

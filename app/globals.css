@@ -10,6 +10,8 @@ H (Hue): What color is it on the color wheel?*/
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --app-html-font-size: 13.5px;
+
   /* Heidi-inspired Theme */
   --background: oklch(0.98 0.005 60); /* #FAF9F6 Cream */
   --foreground: oklch(0.25 0.02 40); /* #4A3B32 Dark Brown Text */
@@ -139,7 +141,7 @@ H (Hue): What color is it on the color wheel?*/
 
   /* 🔽 Global UI scale + zoomed-out feel */
   html {
-    font-size: 13.5px;
+    font-size: var(--app-html-font-size);
   }
 
   body {

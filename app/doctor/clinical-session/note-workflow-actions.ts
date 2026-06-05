@@ -1,7 +1,7 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
-import { currentUser } from "@clerk/nextjs/server";
+import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
@@ -151,13 +151,13 @@ type SaveTemplateNoteDraftResult = {
 };
 
 export async function getActiveNoteTemplatesForSession(): Promise<ActiveNoteTemplatesResult> {
-  const user = await currentUser();
-  if (!user) {
+  const { userId } = await auth();
+  if (!userId) {
     return { success: false, error: "Unauthorized" };
   }
 
   const dbUser = await prisma.user.findUnique({
-    where: { clerkId: user.id },
+    where: { clerkId: userId },
     select: { id: true },
   });
 
@@ -214,13 +214,13 @@ export async function generateAppointmentNoteFromTemplate(
     speakerMapping?: Record<string, string>;
   },
 ): Promise<GenerateTemplateNoteResult> {
-  const user = await currentUser();
-  if (!user) {
+  const { userId } = await auth();
+  if (!userId) {
     return { success: false, error: "Unauthorized" };
   }
 
   const dbUser = await prisma.user.findUnique({
-    where: { clerkId: user.id },
+    where: { clerkId: userId },
     select: { id: true },
   });
 
@@ -429,13 +429,13 @@ export async function saveAppointmentTemplateNoteDraft(
   templateId: string,
   noteDataDraft: Record<string, unknown>,
 ): Promise<SaveTemplateNoteDraftResult> {
-  const user = await currentUser();
-  if (!user) {
+  const { userId } = await auth();
+  if (!userId) {
     return { success: false, error: "Unauthorized" };
   }
 
   const dbUser = await prisma.user.findUnique({
-    where: { clerkId: user.id },
+    where: { clerkId: userId },
     select: { id: true },
   });
 

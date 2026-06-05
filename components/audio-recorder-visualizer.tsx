@@ -7,7 +7,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
-import { Mic, Square, Trash, Download, Timer as TimerIcon, ChevronDown, CheckCircle2, ChevronRight, StopCircle } from "lucide-react";
+import { Loader2, Mic, Square, Trash, Download, Timer as TimerIcon, ChevronDown, CheckCircle2, ChevronRight, StopCircle } from "lucide-react";
 import { FaMicrophone, FaPlay, FaPause } from "react-icons/fa";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
@@ -21,6 +21,7 @@ type Props = {
   onDiscard?: () => void;
   onStop: (blob: Blob) => void;
   isUploading: boolean;
+  isTranscribing?: boolean;
   isWarmingUp?: boolean;
   startSignal?: number;
   selectedMicrophoneId?: string;
@@ -40,6 +41,7 @@ export const AudioRecorderWithVisualizer = ({
   onDiscard,
   onStop,
   isUploading,
+  isTranscribing = false,
   isWarmingUp = false,
   startSignal = 0,
   selectedMicrophoneId,
@@ -85,6 +87,7 @@ export const AudioRecorderWithVisualizer = ({
   async function startRecording() {
     if (isRecording) return;
     if (isWarmingUp) return;
+    if (isTranscribing) return;
 
     if (onStartRequest) {
       const canStart = await onStartRequest();
@@ -410,15 +413,42 @@ export const AudioRecorderWithVisualizer = ({
           <Button
             type="button"
             onClick={startRecording}
-            disabled={isWarmingUp}
+            disabled={isWarmingUp || isTranscribing}
             className={cn(
               "w-full h-full gap-2 font-medium shadow-none rounded-md bg-[#CCFF0B] text-black hover:bg-[#B8E609]",
               // Using default primary/secondary variants or specific classes to match theme
             )}
             variant="default" // Use default variant (usually black/primary color)
           >
-            {isWarmingUp ? <div className="w-4 h-4 border-2 border-black/40 border-t-black rounded-full animate-spin" /> : <FaMicrophone className="w-4 h-4" />}
-            {isWarmingUp ? "Warming up Server..." : "Start Session"}
+            <span className="relative flex items-center justify-center h-4 min-w-[8.75rem] overflow-hidden">
+              <span
+                className={cn(
+                  "absolute inset-0 flex items-center justify-center gap-2 transition-all duration-300",
+                  !isWarmingUp && !isTranscribing ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0",
+                )}
+              >
+                <FaMicrophone className="w-4 h-4" />
+                Start Session
+              </span>
+              <span
+                className={cn(
+                  "absolute inset-0 flex items-center justify-center gap-2 transition-all duration-300",
+                  isWarmingUp ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0",
+                )}
+              >
+                <div className="w-4 h-4 border-2 border-black/40 border-t-black rounded-full animate-spin" />
+                Warming up...
+              </span>
+              <span
+                className={cn(
+                  "absolute inset-0 flex items-center justify-center gap-2 transition-all duration-300",
+                  isTranscribing && !isWarmingUp ? "translate-y-0 opacity-100" : "-translate-y-2 opacity-0",
+                )}
+              >
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Transcribing
+              </span>
+            </span>
           </Button>
         </div>
 

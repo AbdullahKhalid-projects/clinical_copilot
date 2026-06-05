@@ -1475,6 +1475,8 @@ export type PreviousAppointmentSummary = {
   date: Date;
   status: string;
   reason: string | null;
+  doctorName: string | null;
+  soapNoteUrl: string | null;
   transcript: unknown;
   soapNote: unknown;
 };
@@ -1514,20 +1516,25 @@ export async function getPatientPreviousAppointments(
   const previousAppointments = await prisma.appointment.findMany({
     where: {
       patientId: currentAppointment.patientId,
-      doctorId: doctor.id,
       id: { not: appointmentId },
       date: { lt: currentAppointment.date },
-      status: { in: ["COMPLETED", "IN_PROGRESS"] },
-      OR: [
-        { transcript: { not: Prisma.JsonNull } },
-        { soapNote: { not: Prisma.JsonNull } },
-      ],
+      status: "COMPLETED",
     },
     select: {
       id: true,
       date: true,
       status: true,
       reason: true,
+      soapNoteUrl: true,
+      doctor: {
+        select: {
+          user: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
       transcript: true,
       soapNote: true,
     },
@@ -1542,6 +1549,8 @@ export async function getPatientPreviousAppointments(
       date: appt.date,
       status: appt.status,
       reason: appt.reason,
+      doctorName: appt.doctor?.user?.name ?? null,
+      soapNoteUrl: appt.soapNoteUrl ?? null,
       transcript: appt.transcript,
       soapNote: appt.soapNote,
     })),

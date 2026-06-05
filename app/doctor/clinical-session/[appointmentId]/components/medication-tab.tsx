@@ -3,7 +3,6 @@
 import * as React from "react";
 import {
   Loader2,
-  MessageSquare,
   Moon,
   Plus,
   ShoppingBag,
@@ -15,6 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ShifaActionPill } from "@/components/shifa-action-pill";
 import {
   Card,
   CardContent,
@@ -622,7 +622,7 @@ export function MedicationTab({
             <section className="space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1">
-                  <h3 className="text-sm font-semibold text-foreground">Doctor Is Adding</h3>
+                  <h3 className="text-sm font-semibold text-foreground">Staged Medications</h3>
                   <p className="text-xs text-muted-foreground">
                     Set duration and a light-based schedule directly here.
                   </p>
@@ -731,26 +731,16 @@ export function MedicationTab({
                               ? "This medication could not be resolved cleanly."
                               : "Run Shifa on this medication to check safety."}
                           </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8 gap-2"
+                          <ShifaActionPill
                             disabled={!hasLinkedPatient || isDraftReviewRunning || isSafetyReviewRunning}
+                            isLoading={isDraftReviewRunning}
                             onClick={() => onAskShifaForDraft?.(draft.draftId)}
                             title={
                               !hasLinkedPatient
                                 ? "Link a patient before asking Shifa"
                                 : "Run Shifa for this medication"
                             }
-                          >
-                            {isDraftReviewRunning ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <MessageSquare className="h-4 w-4" />
-                            )}
-                            Ask Shifa
-                          </Button>
+                          />
                         </div>
                       </CardContent>
                     </Card>

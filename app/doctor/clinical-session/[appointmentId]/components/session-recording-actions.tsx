@@ -7,6 +7,7 @@ import { AudioRecorderWithVisualizer } from "@/components/audio-recorder-visuali
 
 interface SessionRecordingActionsProps {
   isUploading: boolean;
+  isTranscribing?: boolean;
   isWarmingUp?: boolean;
   startSignal?: number;
   selectedMicrophoneId?: string;
@@ -21,6 +22,7 @@ interface SessionRecordingActionsProps {
 
 export function SessionRecordingActions({
   isUploading,
+  isTranscribing = false,
   isWarmingUp = false,
   startSignal = 0,
   selectedMicrophoneId,
@@ -40,7 +42,7 @@ export function SessionRecordingActions({
         size="icon"
         className="h-9 w-9 rounded-md border border-border bg-muted/40 text-foreground hover:bg-muted"
         onClick={() => uploadInputRef.current?.click()}
-        disabled={isUploading}
+        disabled={isUploading || isTranscribing}
         title="Upload Recording"
         aria-label="Upload Recording"
       >
@@ -60,6 +62,7 @@ export function SessionRecordingActions({
         onDiscard={onDiscard}
         onStop={onStop}
         isUploading={isUploading}
+        isTranscribing={isTranscribing}
         isWarmingUp={isWarmingUp}
         startSignal={startSignal}
         selectedMicrophoneId={selectedMicrophoneId}

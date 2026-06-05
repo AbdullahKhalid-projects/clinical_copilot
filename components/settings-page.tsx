@@ -11,8 +11,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useUIPreferences } from "@/components/ui-preferences-provider";
 
 type SettingsPageProps = {
   role: "doctor" | "patient";
@@ -30,6 +32,7 @@ function getInitials(name: string) {
 export function SettingsPage({ role }: SettingsPageProps) {
   const { user } = useUser();
   const { openUserProfile } = useClerk();
+  const { htmlFontSize, setHtmlFontSize, resetPreferences } = useUIPreferences();
 
   const displayName =
     user?.fullName ||
@@ -308,9 +311,9 @@ export function SettingsPage({ role }: SettingsPageProps) {
                 <SlidersHorizontal className="h-5 w-5 text-primary" />
                 Preferences
               </CardTitle>
-              <CardDescription>App defaults and notification behavior.</CardDescription>
+              <CardDescription>App defaults, notification behavior, and display scaling.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <Label htmlFor={`${role}-autosave`} className="text-sm font-medium">
@@ -347,6 +350,47 @@ export function SettingsPage({ role }: SettingsPageProps) {
                     <SelectItem value="apso">APSO</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4 rounded-xl border border-border bg-muted/30 p-4">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground">Display scaling</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Fine-tune the app-wide root size without editing CSS.
+                    </p>
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={resetPreferences}>
+                    Reset sizing
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label htmlFor={`${role}-html-font-size`} className="text-sm font-medium">
+                      HTML root size
+                    </Label>
+                    <Badge variant="outline">{htmlFontSize.toFixed(1)}px</Badge>
+                  </div>
+                  <Slider
+                    id={`${role}-html-font-size`}
+                    min={11}
+                    max={18}
+                    step={0.5}
+                    value={[htmlFontSize]}
+                    onValueChange={([value]) => {
+                      if (typeof value === "number") {
+                        setHtmlFontSize(value);
+                      }
+                    }}
+                    aria-label="Adjust HTML root font size"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Scales rem-based UI sizing across the app, similar to changing `html` in `globals.css`.
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>

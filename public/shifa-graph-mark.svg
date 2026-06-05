@@ -1,0 +1,36 @@
+<svg width="320" height="220" viewBox="0 0 320 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g opacity="0.36" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M160 42V58" stroke-opacity="0.18" stroke-width="4.5"/>
+    <circle cx="160" cy="34" r="5.5" fill="currentColor" fill-opacity="0.14" stroke="none"/>
+
+    <path d="M96 82C100 66 113 56 129 56H191C208 56 221 66 224 82L230 128C233 149 217 168 196 168H124C103 168 87 149 90 128L96 82Z" stroke-opacity="0.18" stroke-width="5.5"/>
+
+    <path d="M112 82C120 77 130 75 142 74" stroke-opacity="0.1" stroke-width="4"/>
+    <path d="M179 74C191 75 201 79 208 86" stroke-opacity="0.1" stroke-width="4"/>
+
+    <ellipse cx="131" cy="105" rx="14" ry="18" transform="rotate(-9 131 105)" stroke-opacity="0.2" stroke-width="4.5"/>
+    <ellipse cx="189" cy="102" rx="10" ry="15" transform="rotate(12 189 102)" stroke-opacity="0.2" stroke-width="4.5"/>
+
+    <circle cx="134" cy="109" r="3.5" fill="currentColor" fill-opacity="0.22" stroke="none"/>
+    <circle cx="186" cy="105" r="3" fill="currentColor" fill-opacity="0.22" stroke="none"/>
+
+    <path d="M153 118C156 121 155 127 151 131" stroke-opacity="0.17" stroke-width="4.5"/>
+    <path d="M127 139C139 151 156 154 174 151C182 150 189 147 195 142" stroke-opacity="0.2" stroke-width="5"/>
+
+    <path d="M123 147C131 144 138 145 144 151" stroke-opacity="0.11" stroke-width="3.5"/>
+    <path d="M177 151C184 145 191 143 199 147" stroke-opacity="0.11" stroke-width="3.5"/>
+
+    <path d="M112 170L98 182" stroke-opacity="0.12" stroke-width="4"/>
+    <path d="M208 170L220 181" stroke-opacity="0.12" stroke-width="4"/>
+    <path d="M216 89C234 79 246 83 248 100C250 114 241 123 228 123" stroke-opacity="0.18" stroke-width="4.5"/>
+    <path d="M246 83C255 75 262 76 265 84" stroke-opacity="0.14" stroke-width="4"/>
+    <path d="M253 92C263 87 269 89 272 96" stroke-opacity="0.12" stroke-width="3.5"/>
+    <path d="M247 103C256 103 262 107 264 114" stroke-opacity="0.1" stroke-width="3.5"/>
+    <path d="M121 187C141 192 180 193 201 186" stroke-opacity="0.08" stroke-width="4"/>
+
+    <circle cx="102" cy="183" r="3.5" fill="currentColor" fill-opacity="0.1" stroke="none"/>
+    <circle cx="221" cy="182" r="3.5" fill="currentColor" fill-opacity="0.1" stroke="none"/>
+    <circle cx="238" cy="75" r="3" fill="currentColor" fill-opacity="0.08" stroke="none"/>
+    <circle cx="82" cy="88" r="3" fill="currentColor" fill-opacity="0.08" stroke="none"/>
+  </g>
+</svg>

@@ -4,6 +4,7 @@ import type { Metadata } from 'next'
 import { Inter, Libre_Baskerville } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/toaster'
+import { UIPreferencesProvider } from '@/components/ui-preferences-provider'
 import './globals.css'
 
 const inter = Inter({ 
@@ -52,9 +53,11 @@ export default function RootLayout({
           className={`${inter.variable} ${libreBaskerville.variable} font-sans antialiased text-[#2D2422] bg-[#FAF9F6]`}
           suppressHydrationWarning
         >
-          {children}
-          <Toaster />
-          <Analytics />
+          <UIPreferencesProvider>
+            {children}
+            <Toaster />
+            <Analytics />
+          </UIPreferencesProvider>
         </body>
       </html>
     </ClerkProvider>
