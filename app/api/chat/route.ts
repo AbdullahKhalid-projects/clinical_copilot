@@ -41,7 +41,7 @@ const SYSTEM_PROMPT = BASE_SYSTEM_PROMPT;
 
 const RAG_MODEL_BASE_URL =
   process.env.CHAT_PANEL_MODEL_URL?.trim() ||
-  "https://bsparx64--example-qwen3-6-27b-awq-inference-vllmserver-serve.modal.run/v1";
+  "https://bsparx64--example-qwen3-6-27b-awq-inference2-vllmserver-serve.modal.run/v1";
 const RAG_MODEL_NAME =
   process.env.CHAT_PANEL_MODEL_NAME?.trim() ||
   "Intel/Qwen3.6-27B-int4-AutoRound";
