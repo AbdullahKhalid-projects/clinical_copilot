@@ -65,6 +65,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { NoteDocument } from "@/lib/note-document-pdf";
+import { getPrimaryMedicationQueryCandidate } from "@/lib/medication-query";
 import type { SoapTemplate } from "@/app/doctor/templates/types";
 import { renderNotePreviewFromObject } from "@/app/doctor/templates/template-engine";
 
@@ -149,6 +150,7 @@ function buildMedicationSafetyPrompt(args: {
             return [
                 `${index + 1}. ${draft.drugName}`,
                 `Compound query term: ${queryDrug}`,
+                `Generic name: ${draft.genericName?.trim() || "Not specified"}`,
                 `Formula: ${formula}`,
                 `Indication: ${indication}`,
                 `Schedule: ${draft.scheduleCounts.day}-${draft.scheduleCounts.noon}-${draft.scheduleCounts.night}`,
@@ -161,8 +163,11 @@ function buildMedicationSafetyPrompt(args: {
         "Run a medication safety review for the staged prescriptions in this clinical session.",
         "Use the verify_prescription_safety tool for every staged medication.",
         "For proposedDrug, use the provided compound query term, not the brand/display name.",
-        "Do not ask follow-up questions.",
-        "Return one concise section per medication with: overall status, allergy conflicts, drug interactions, and contraindications.",
+        "Before you offer any next actions, give the doctor a visible concise summary in 2 to 4 short bullet points.",
+        "If there are allergy, interaction, or contraindication warnings, say that explicitly in the visible summary.",
+        "After finishing the safety review, call the offer_medication_followups tool instead of asking a plain-text follow-up question.",
+        "Pass every staged medication into offer_medication_followups using the display medication name, compound query term, generic name if available, and active ingredients if available.",
+        "Return one concise visible section per medication with: overall status, allergy conflicts, drug interactions, and contraindications.",
         "If no warnings are found, explicitly say the graph safety check found no warnings.",
         "",
         `Appointment reason: ${args.appointmentReason || "Not specified"}`,
@@ -174,23 +179,13 @@ function buildMedicationSafetyPrompt(args: {
 }
 
 function deriveMedicationQueryDrug(draft: MedicationDraftSelection): string {
-    const strength = draft.medication.strength?.trim() || "";
-    const form = draft.medication.form?.trim() || "";
-
-    if (strength) {
-        const withoutLeadingDose = strength
-            .replace(/^\s*\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|%)+\s*/i, "")
-            .replace(/^\s*\d+(?:\.\d+)?\s*%+\s*/i, "")
-            .trim();
-
-        if (withoutLeadingDose) {
-            return form && !withoutLeadingDose.toLowerCase().includes(form.toLowerCase())
-                ? `${withoutLeadingDose} ${form}`.trim()
-                : withoutLeadingDose;
-        }
-    }
-
-    return draft.medication.drugName.trim();
+    return getPrimaryMedicationQueryCandidate({
+        drugName: draft.medication.drugName,
+        genericName: draft.medication.genericName,
+        activeIngredients: draft.medication.activeIngredients,
+        primekgQueryTerms: draft.medication.primekgQueryTerms,
+        fallbackQueryDrug: null,
+    });
 }
 
 function extractNoteTextFromPayload(rawSoapNote: any): string {
@@ -417,6 +412,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const [medicationDraftSelections, setMedicationDraftSelections] = React.useState<MedicationDraftSelection[]>([]);
     const [medicationSafetyByDraftId, setMedicationSafetyByDraftId] = React.useState<Record<string, MedicationSafetyReviewItemResult>>({});
     const [isMedicationSafetyReviewRunning, setIsMedicationSafetyReviewRunning] = React.useState(false);
+    const [reviewingMedicationDraftIds, setReviewingMedicationDraftIds] = React.useState<string[]>([]);
     const [isLanguageDialogOpen, setIsLanguageDialogOpen] = React.useState(false);
     const [pendingStartAfterLanguageSelection, setPendingStartAfterLanguageSelection] = React.useState(false);
     const [startSignal, setStartSignal] = React.useState(0);
@@ -473,9 +469,26 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
     const liveSourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
     const isRecorderPausedRef = React.useRef(false);
     const [retrievalMode, setRetrievalMode] = React.useState<"normal" | "semantic">("normal");
+    const [primeKgMode, setPrimeKgMode] = React.useState(false);
 
     const handleToggleRetrievalMode = React.useCallback(() => {
-        setRetrievalMode((prev) => (prev === "normal" ? "semantic" : "normal"));
+        setRetrievalMode((prev) => {
+            const next = prev === "normal" ? "semantic" : "normal";
+            if (next === "semantic") {
+                setPrimeKgMode(false);
+            }
+            return next;
+        });
+    }, []);
+
+    const handleTogglePrimeKgMode = React.useCallback(() => {
+        setPrimeKgMode((prev) => {
+            const next = !prev;
+            if (next) {
+                setRetrievalMode("normal");
+            }
+            return next;
+        });
     }, []);
 
     const persistedTranscript = React.useMemo<TranscriptSegment[]>(() => {
@@ -2069,6 +2082,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                     patientMetricCatalog,
                     includePatientDocuments: true,
                     retrievalMode,
+                    primeKgMode,
                 },
             },
         }),
@@ -2106,7 +2120,7 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         });
     }, [medicationDraftSelections]);
 
-    const handleAskShifaMedicationSafety = React.useCallback(async () => {
+    const handleAskShifaMedicationSafety = React.useCallback(async (targetDraftIds?: string[]) => {
         if (!hasLinkedPatient) {
             toast({
                 title: "Patient required",
@@ -2116,7 +2130,11 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             return;
         }
 
-        if (medicationDraftSelections.length === 0) {
+        const selectedDrafts = (Array.isArray(targetDraftIds) && targetDraftIds.length > 0
+            ? medicationDraftSelections.filter((draft) => targetDraftIds.includes(draft.draftId))
+            : medicationDraftSelections);
+
+        if (selectedDrafts.length === 0) {
             toast({
                 title: "No medications staged",
                 description: "Add at least one medication before asking Shifa to review safety.",
@@ -2125,10 +2143,13 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             return;
         }
 
-        const safetyDrafts: MedicationSafetyReviewDraft[] = medicationDraftSelections.map((draft) => ({
+        const safetyDrafts: MedicationSafetyReviewDraft[] = selectedDrafts.map((draft) => ({
             draftId: draft.draftId,
+            medicineCatalogId: draft.medication.id || null,
             drugName: draft.medication.drugName,
             queryDrug: deriveMedicationQueryDrug(draft),
+            genericName: draft.medication.genericName,
+            activeIngredients: draft.medication.activeIngredients,
             strength: draft.medication.strength,
             form: draft.medication.form,
             indication: draft.medication.indication,
@@ -2156,6 +2177,9 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         }
 
         setIsMedicationSafetyReviewRunning(true);
+        setReviewingMedicationDraftIds((current) =>
+            Array.from(new Set([...current, ...safetyDrafts.map((draft) => draft.draftId)])),
+        );
         try {
             const response = await fetch("/api/medication-safety", {
                 method: "POST",
@@ -2176,13 +2200,16 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                 throw new Error(result?.error || "Medication safety review failed.");
             }
 
-            setMedicationSafetyByDraftId(
-                Object.fromEntries(result.results.map((item) => [item.draftId, item])),
-            );
+            const reviewResults = result.results;
 
-            const warningCount = result.results.filter((item) => item.status === "warning").length;
-            const safeCount = result.results.filter((item) => item.status === "safe").length;
-            const cautionCount = result.results.filter((item) => item.status === "caution").length;
+            setMedicationSafetyByDraftId((current) => ({
+                ...current,
+                ...Object.fromEntries(reviewResults.map((item) => [item.draftId, item])),
+            }));
+
+            const warningCount = reviewResults.filter((item) => item.status === "warning").length;
+            const safeCount = reviewResults.filter((item) => item.status === "safe").length;
+            const cautionCount = reviewResults.filter((item) => item.status === "caution").length;
 
             toast({
                 title: "Shifa review complete",
@@ -2201,6 +2228,9 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
             });
         } finally {
             setIsMedicationSafetyReviewRunning(false);
+            setReviewingMedicationDraftIds((current) =>
+                current.filter((draftId) => !safetyDrafts.some((draft) => draft.draftId === draftId)),
+            );
         }
     }, [
         chatRuntime,
@@ -2211,6 +2241,10 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
         medicationDraftSelections,
         toast,
     ]);
+
+    const handleAskShifaForSingleMedication = React.useCallback((draftId: string) => {
+        void handleAskShifaMedicationSafety([draftId]);
+    }, [handleAskShifaMedicationSafety]);
 
     return (
         <div ref={rootContainerRef} className="relative flex h-[calc(100svh-3rem)] overflow-hidden bg-background">
@@ -2838,6 +2872,8 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                             onDraftSelectionsChange={setMedicationDraftSelections}
                                             safetyReviewByDraftId={medicationSafetyByDraftId}
                                             isSafetyReviewRunning={isMedicationSafetyReviewRunning}
+                                            reviewingDraftIds={reviewingMedicationDraftIds}
+                                            onAskShifaForDraft={handleAskShifaForSingleMedication}
                                             currentPrescriptions={
                                                 Array.isArray(currentAppointment.patient?.prescriptions)
                                                     ? currentAppointment.patient.prescriptions.map((prescription: any) => ({
@@ -2995,6 +3031,8 @@ export function ClinicalSessionClient({ appointment }: ClinicalSessionClientProp
                                 patientName={patientName}
                                 retrievalMode={retrievalMode}
                                 onToggleRetrievalMode={handleToggleRetrievalMode}
+                                primeKgMode={primeKgMode}
+                                onTogglePrimeKgMode={handleTogglePrimeKgMode}
                             />
                         </AssistantRuntimeProvider>
                     </div>

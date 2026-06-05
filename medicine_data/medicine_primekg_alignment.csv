@@ -1,0 +1,90 @@
+local_name,manufacturer_hint,generic_name,active_ingredients,primekg_query_terms,match_confidence,mapping_notes
+Aczone Gel,Ali Gohar Pharma,dapsone,dapsone,dapsone,high,Topical acne product; query by active ingredient.
+Actifed,GSK,triprolidine plus pseudoephedrine,triprolidine; pseudoephedrine,triprolidine; pseudoephedrine,high,Combination cold product; graph queries may need separate ingredient lookups.
+Aloe Vera Gel,Pure Leaf,aloe vera,aloe vera,aloe vera,low,Non-standard topical product; PrimeKG match may be absent.
+Amoxil,GSK,amoxicillin,amoxicillin,amoxicillin,high,Brand maps cleanly to a single antibiotic compound.
+Arinac,Abbott,ibuprofen plus pseudoephedrine,ibuprofen; pseudoephedrine,ibuprofen; pseudoephedrine,high,Combination cold/flu product.
+Arinac Forte,Abott,ibuprofen plus pseudoephedrine,ibuprofen; pseudoephedrine,ibuprofen; pseudoephedrine,high,Combination cold/flu product with higher strengths.
+Augmentin,GSK,amoxicillin plus clavulanic acid,amoxicillin; clavulanic acid,amoxicillin; clavulanic acid,high,Combination antibiotic; query each ingredient if needed.
+Azomax,Pfizer,azithromycin,azithromycin,azithromycin,high,Brand maps cleanly to a single macrolide antibiotic.
+Bactroban,Mupri Pharma,mupirocin,mupirocin,mupirocin,high,Topical antibiotic.
+Benylin,Janssen,likely cough syrup combination,diphenhydramine; dextromethorphan,diphenhydramine; dextromethorphan,low,Brand family has multiple formulas; local dataset lacks exact formulation.
+Betnovate,GSK,betamethasone valerate,betamethasone valerate,betamethasone,high,Topical steroid; query by steroid compound.
+Betnovate-N Gel,GSK,betamethasone plus neomycin,betamethasone; neomycin,betamethasone; neomycin,high,Topical steroid-antibiotic combination.
+Brufen,Abbott,ibuprofen,ibuprofen,ibuprofen,high,Brand maps cleanly to ibuprofen.
+Broxol,Searle,ambroxol,ambroxol,ambroxol,high,Mucolytic/expectorant brand.
+Burnol Gel,Dr. Morepen,nitrofurazone plus chlorhexidine,nitrofurazone; chlorhexidine,nitrofurazone; chlorhexidine,high,Topical burn/wound combination.
+Calpol,GSK,paracetamol,paracetamol,paracetamol; acetaminophen,high,Doctor-facing pediatric brand; query by compound.
+Canesten,Bayer,clotrimazole,clotrimazole,clotrimazole,high,Topical antifungal.
+Candid-B Cream,Glenmark,clotrimazole plus beclomethasone,clotrimazole; beclomethasone,clotrimazole; beclomethasone,high,Combination antifungal-steroid cream.
+Caviplex,ATCO Pharma,multivitamin,multivitamin,multivitamin,low,Supplement product; likely weak or absent PrimeKG coverage.
+Cefspan,Searle,cefixime,cefixime,cefixime,high,Brand maps cleanly to cefixime.
+Celebrex,Pfizer,celecoxib,celecoxib,celecoxib,high,Brand maps cleanly to celecoxib.
+Cetamol Cold,GSK,likely paracetamol cold combination,paracetamol; pseudoephedrine,paracetamol; pseudoephedrine,medium,Dataset only shows two-part strength and likely cold-combo formulation.
+Cetirizine,AGP or Getz Pharma,cetirizine,cetirizine,cetirizine,high,Already generic in local dataset.
+Ciproxin,Bayer,ciprofloxacin,ciprofloxacin,ciprofloxacin,high,Brand maps cleanly to ciprofloxacin.
+Claritek,Getz Pharma,clarithromycin,clarithromycin,clarithromycin,high,Brand maps cleanly to clarithromycin.
+Clarinase Repetabs,MSD,loratadine plus pseudoephedrine,loratadine; pseudoephedrine,loratadine; pseudoephedrine,high,Combination antihistamine-decongestant.
+Coughnil,Sami Pharma,likely cough suppressant combination,dextromethorphan,dextromethorphan,low,Exact formulation absent in CSV; use only as fallback mapping.
+Daktarin,Janssen,miconazole,miconazole,miconazole,high,Topical antifungal brand.
+Daktarin Gel,Janssen Pharma,miconazole nitrate,miconazole,miconazole,high,Topical/oral gel variant; query by active ingredient.
+Dermovate,Novo Nordisk,clobetasol propionate,clobetasol propionate,clobetasol; clobetasol propionate,high,High-potency topical steroid.
+Dicloran Gel,Sami Pharma,diclofenac,diclofenac,diclofenac,high,Topical NSAID.
+Disprin,Various,aspirin,aspirin,aspirin,high,Brand maps cleanly to aspirin.
+Disprol,Various,paracetamol,paracetamol,paracetamol; acetaminophen,high,Analgesic/antipyretic brand commonly aligned to paracetamol.
+Dologel,Macleods,lidocaine plus choline salicylate plus benzalkonium chloride,lidocaine; choline salicylate; benzalkonium chloride,lidocaine; choline salicylate,high,Oral pain gel; prioritize therapeutic actives for graph queries.
+Emla Gel,AstraZeneca,lidocaine plus prilocaine,lidocaine; prilocaine,lidocaine; prilocaine,high,Topical anesthetic combination.
+Entamizole,Searle,diloxanide furoate plus metronidazole,diloxanide furoate; metronidazole,diloxanide furoate; metronidazole,high,Antiamoebic combination.
+Erythrocin,Bosch or Abbot,erythromycin,erythromycin,erythromycin,high,Brand maps cleanly to erythromycin.
+Fastum Gel,Menarini,ketoprofen,ketoprofen,ketoprofen,high,Topical NSAID.
+Finac Gel,Hilton Pharma,tretinoin,tretinoin,tretinoin,medium,Local indication text looks inconsistent, but compound is explicit in CSV.
+Flagyl,Pfizer,metronidazole,metronidazole,metronidazole,high,Brand maps cleanly to metronidazole.
+Gravinate,Platinum Pharma,dimenhydrinate,dimenhydrinate,dimenhydrinate,high,Brand maps cleanly to an antiemetic compound.
+Histac,AGP,likely cetirizine,cetirizine,cetirizine,medium,Brand likely an antihistamine aligned to cetirizine based on dose and indication.
+Histazine,Hilton Pharma,likely cetirizine,cetirizine,cetirizine,medium,Brand likely an antihistamine aligned to cetirizine based on dose and indication.
+Hydryllin,Searle,likely cough syrup combination,diphenhydramine; ammonium chloride; sodium citrate,diphenhydramine; ammonium chloride; sodium citrate,medium,Common Hydryllin formulations are multi-ingredient and the CSV omits strengths.
+Ibuprofen (Children),Abbott,ibuprofen,ibuprofen,ibuprofen,high,Pediatric formulation; query by ibuprofen compound.
+Imodium,Janssen,loperamide,loperamide,loperamide,high,Brand maps cleanly to loperamide.
+Iodex Ultra Gel,GSK,iodine complex,iodine complex,povidone-iodine; iodine,low,Topical pain-relief branding may not align cleanly to PrimeKG.
+Lamisil Gel,NOVARTIS,terbinafine,terbinafine,terbinafine,high,Topical antifungal.
+Levoflox,Getz,levofloxacin,levofloxacin,levofloxacin,high,Brand maps cleanly to levofloxacin.
+Lomotil,Jonas Pharma,diphenoxylate plus atropine,diphenoxylate; atropine,diphenoxylate; atropine,high,Combination antidiarrheal.
+Losec,AstraZeneca,omeprazole,omeprazole,omeprazole,high,Brand maps cleanly to omeprazole.
+Metrogyl Gel,Unexo or Abbott,metronidazole,metronidazole,metronidazole,high,Topical metronidazole formulation.
+Montiget,Getz Pharma,montelukast,montelukast,montelukast,high,Brand maps cleanly to montelukast.
+Moov Gel,Reckitt Benckiser,diclofenac,diclofenac,diclofenac,high,CSV explicitly lists diclofenac percentage.
+Mucosolvan,Boehringer,ambroxol,ambroxol,ambroxol,high,Brand maps cleanly to ambroxol.
+Myteka,Getz Pharma,montelukast,montelukast,montelukast,high,Brand maps cleanly to montelukast.
+Naproxen,Bosch,naproxen,naproxen,naproxen,high,Already generic in local dataset.
+Neosporin Ointment,GSK,bacitracin plus neomycin,bacitracin; neomycin,bacitracin; neomycin,high,Topical antibiotic combination.
+Neurobion,Merck,vitamin B complex,thiamine; pyridoxine; cyanocobalamin,thiamine; pyridoxine; cyanocobalamin,high,Vitamin injection/supplement; graph support may vary by ingredient.
+Nuberol Forte,Sami Pharma,paracetamol plus orphenadrine,paracetamol; orphenadrine,paracetamol; orphenadrine,high,Combination analgesic-muscle relaxant.
+OMC-D,Sami Pharma,likely omeprazole-based acid suppressant,omeprazole,omeprazole,medium,Brand likely maps to omeprazole; CSV does not expose any second ingredient.
+ORS Sachets,Various,oral rehydration salts,sodium chloride; potassium chloride; trisodium citrate; glucose,oral rehydration salts,low,Electrolyte formulation rather than a single drug entity.
+Panadol,GSK,paracetamol,paracetamol,paracetamol; acetaminophen,high,Doctor-facing brand; query by compound.
+Panadol Extend,GSK,paracetamol,paracetamol,paracetamol; acetaminophen,high,Extended-release paracetamol brand.
+Panadol Extra,GSK,paracetamol plus caffeine,paracetamol; caffeine,paracetamol; acetaminophen; caffeine,high,Combination analgesic.
+Paracetamol,Various,paracetamol,paracetamol,paracetamol; acetaminophen,high,Already generic in local dataset.
+Piriton,GSK,chlorpheniramine,chlorpheniramine,chlorpheniramine,high,Brand maps cleanly to chlorpheniramine.
+Polyfax Eye Ointment,GlaxoSmithKline,polymyxin B plus bacitracin,polymyxin B; bacitracin,polymyxin B; bacitracin,high,Topical ophthalmic antibiotic combination.
+Polyfax Skin Ointment,GlaxoSmithKline,polymyxin B plus bacitracin,polymyxin B; bacitracin,polymyxin B; bacitracin,high,Topical skin antibiotic combination.
+Ponstan,Pfizer,mefenamic acid,mefenamic acid,mefenamic acid,high,Brand maps cleanly to mefenamic acid.
+Refresh Eye Gel,Allergan,carboxymethylcellulose,carboxymethylcellulose,carboxymethylcellulose,high,Ophthalmic lubricant.
+Retin-A Gel,Janssen,tretinoin,tretinoin,tretinoin,high,Topical retinoid.
+Rigix,AGP,cetirizine,cetirizine,cetirizine,high,Brand maps cleanly to cetirizine.
+Risek,Getz Pharma,omeprazole,omeprazole,omeprazole,high,Brand maps cleanly to omeprazole.
+Rivotril,Roche,clonazepam,clonazepam,clonazepam,high,Brand maps cleanly to clonazepam.
+Silverex Gel,Maxitech Pharma,silver sulfadiazine,silver sulfadiazine,silver sulfadiazine,high,Topical antimicrobial for burns/wounds.
+Soframycin,Franco-Indian Pharma,framycetin,framycetin,framycetin,high,Topical antibiotic.
+Spasfon,PharmEvo,phloroglucinol,phloroglucinol,phloroglucinol,high,Antispasmodic brand.
+Tamsol D,Himont,tamsulosin plus dutasteride,tamsulosin; dutasteride,tamsulosin; dutasteride,high,Combination BPH therapy.
+Telfast,Sanofi or Tabros Pharma,fexofenadine,fexofenadine,fexofenadine,high,Brand maps cleanly to fexofenadine.
+Terbinafine Gel,Sami Pharma,terbinafine,terbinafine,terbinafine,high,Topical antifungal.
+Ventolin,GSK,salbutamol,albuterol; salbutamol,salbutamol; albuterol,high,Use both international and US generic names for graph lookup robustness.
+Volini Gel,Reckitt or Reckitt Benckiser,diclofenac,diclofenac,diclofenac,high,Topical NSAID gel.
+Voveran Emulgel,Novartis,diclofenac,diclofenac,diclofenac,high,Topical diclofenac product.
+Zantac,GSK,ranitidine,ranitidine,ranitidine,high,Brand maps cleanly to ranitidine.
+Zentel,GSK,albendazole,albendazole,albendazole,high,Brand maps cleanly to albendazole.
+Zindaclin Gel,GSK,clindamycin,clindamycin,clindamycin,high,Topical acne antibiotic.
+Zytee Gel,Shield,choline salicylate plus lidocaine,choline salicylate; lidocaine,choline salicylate; lidocaine,high,Oral pain gel; prioritize therapeutic actives.
+Zyrtec,UCB,cetirizine,cetirizine,cetirizine,high,Brand maps cleanly to cetirizine.

@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import neo4j, { type Driver } from "neo4j-driver";
 import { verifyPrescriptionSafetyQuery } from "@/code";
 import { loadMedicationCatalogFromCsv, type MedicationCatalogItem } from "@/lib/medicine-catalog";
+import { buildMedicationQueryCandidates } from "@/lib/medication-query";
+import { resolveNeo4jPatientGraphId } from "@/lib/neo4j-patient-id";
 import { uploadVisitSummaryPdfToCloudinary } from "@/lib/cloudinary";
 import { buildVisitSummaryFilename, formatVisitSummaryDateLabel } from "@/lib/visit-summary-pdf";
 import { renderNoteDocumentPdfBuffer } from "@/lib/note-document-pdf";
@@ -327,8 +329,11 @@ export type MedicationFinalizeDraft = {
 
 export type MedicationSafetyReviewDraft = {
   draftId: string;
+  medicineCatalogId?: string | null;
   drugName: string;
   queryDrug?: string | null;
+  genericName?: string | null;
+  activeIngredients?: string[] | null;
   strength: string | null;
   form: string | null;
   indication: string | null;
@@ -343,6 +348,7 @@ export type MedicationSafetyReviewDraft = {
 export type MedicationSafetyReviewItemResult = {
   draftId: string;
   proposedDrug: string;
+  queriedDrugs?: string[];
   proposedMedicine: string | null;
   warningAllergies: string[];
   warningInteractions: string[];
@@ -455,6 +461,22 @@ export type MedicationCatalogResult = {
 };
 
 function mapMedicationCatalogRecord(record: any): MedicationCatalogItem {
+  const splitMultiValueField = (value: unknown): string[] => {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return [];
+    }
+
+    return value
+      .split(";")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  };
+
+  const rawConfidence =
+    typeof record.matchConfidence === "string"
+      ? record.matchConfidence.trim().toLowerCase()
+      : null;
+
   return {
     id: String(record.id),
     drugName: String(record.drugName),
@@ -462,6 +484,14 @@ function mapMedicationCatalogRecord(record: any): MedicationCatalogItem {
     manufacturer: record.manufacturer ? String(record.manufacturer) : null,
     strength: record.strength ? String(record.strength) : null,
     form: record.form ? String(record.form) : null,
+    genericName: record.genericName ? String(record.genericName) : null,
+    activeIngredients: splitMultiValueField(record.activeIngredients),
+    primekgQueryTerms: splitMultiValueField(record.primekgQueryTerms),
+    matchConfidence:
+      rawConfidence === "high" || rawConfidence === "medium" || rawConfidence === "low"
+        ? rawConfidence
+        : null,
+    mappingNotes: record.mappingNotes ? String(record.mappingNotes) : null,
     indication: record.indication ? String(record.indication) : null,
     sideEffects: record.sideEffects ? String(record.sideEffects) : null,
     availableIn: record.availableIn ? String(record.availableIn) : null,
@@ -596,13 +626,63 @@ export async function runMedicationSafetyReview(
     };
   }
 
+  const neo4jPatientId = resolveNeo4jPatientGraphId({
+    appointmentPatientId: appointment.patientId,
+  });
+
+  const medicineCatalogIds = Array.from(
+    new Set(
+      drafts
+        .map((draft) => draft.medicineCatalogId?.trim() || null)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+
+  const medicineCatalogRecords =
+    medicineCatalogIds.length > 0
+      ? await prisma.medicineCatalog.findMany({
+          where: {
+            id: {
+              in: medicineCatalogIds,
+            },
+          },
+        })
+      : [];
+  const medicineCatalogById = new Map(
+    medicineCatalogRecords.map((record) => [record.id, record]),
+  );
+
   const results = await Promise.all(
     drafts.map(async (draft): Promise<MedicationSafetyReviewItemResult> => {
-      const proposedDrug = draft.queryDrug?.trim() || draft.drugName.trim();
-      if (!proposedDrug) {
+      const medicineCatalogRecord = draft.medicineCatalogId
+        ? medicineCatalogById.get(draft.medicineCatalogId)
+        : undefined;
+      const queryCandidates = buildMedicationQueryCandidates({
+        drugName: draft.drugName,
+        genericName: medicineCatalogRecord?.genericName ?? null,
+        activeIngredients:
+          typeof medicineCatalogRecord?.activeIngredients === "string"
+            ? medicineCatalogRecord.activeIngredients
+                .split(";")
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0)
+            : [],
+        primekgQueryTerms:
+          typeof medicineCatalogRecord?.primekgQueryTerms === "string"
+            ? medicineCatalogRecord.primekgQueryTerms
+                .split(";")
+                .map((item) => item.trim())
+                .filter((item) => item.length > 0)
+            : [],
+        fallbackQueryDrug: draft.queryDrug?.trim() || null,
+      });
+      const proposedDrug = queryCandidates[0] ?? draft.drugName.trim();
+
+      if (!proposedDrug || queryCandidates.length === 0) {
         return {
           draftId: draft.draftId,
           proposedDrug: "",
+          queriedDrugs: [],
           proposedMedicine: null,
           warningAllergies: [],
           warningInteractions: [],
@@ -612,56 +692,80 @@ export async function runMedicationSafetyReview(
         };
       }
 
-      const queryResult = await runNeo4jReadQuery(verifyPrescriptionSafetyQuery, {
-        patientId: appointment.patientId,
-        proposedDrug,
-      });
+      const warningAllergies = new Set<string>();
+      const warningInteractions = new Set<string>();
+      const warningContraindications = new Set<string>();
+      const matchedMedicines = new Set<string>();
+      let lastError: string | undefined;
+      let matchedAnyCandidate = false;
 
-      if (!queryResult.ok) {
+      for (const candidate of queryCandidates) {
+        const queryResult = await runNeo4jReadQuery(verifyPrescriptionSafetyQuery, {
+          patientId: neo4jPatientId,
+          proposedDrug: candidate,
+        });
+
+        if (!queryResult.ok) {
+          lastError = queryResult.error;
+          continue;
+        }
+
+        const firstRow = queryResult.rows[0];
+        if (!firstRow) {
+          continue;
+        }
+
+        matchedAnyCandidate = true;
+        for (const item of toStringArray(firstRow.Warning_Allergies)) {
+          warningAllergies.add(item);
+        }
+        for (const item of toStringArray(firstRow.Warning_Interactions)) {
+          warningInteractions.add(item);
+        }
+        for (const item of toStringArray(firstRow.Warning_Contraindications)) {
+          warningContraindications.add(item);
+        }
+
+        if (
+          typeof firstRow.ProposedMedicine === "string" &&
+          firstRow.ProposedMedicine.trim()
+        ) {
+          matchedMedicines.add(firstRow.ProposedMedicine.trim());
+        }
+      }
+
+      if (!matchedAnyCandidate) {
         return {
           draftId: draft.draftId,
           proposedDrug,
+          queriedDrugs: queryCandidates,
           proposedMedicine: null,
           warningAllergies: [],
           warningInteractions: [],
           warningContraindications: [],
           status: "caution",
-          error: queryResult.error,
+          error:
+            lastError ??
+            "No Neo4j result rows found for this medication or its mapped compounds.",
         };
       }
 
-      const firstRow = queryResult.rows[0];
-      if (!firstRow) {
-        return {
-          draftId: draft.draftId,
-          proposedDrug,
-          proposedMedicine: null,
-          warningAllergies: [],
-          warningInteractions: [],
-          warningContraindications: [],
-          status: "caution",
-          error: "No Neo4j result rows found for this medication.",
-        };
-      }
-
-      const warningAllergies = toStringArray(firstRow.Warning_Allergies);
-      const warningInteractions = toStringArray(firstRow.Warning_Interactions);
-      const warningContraindications = toStringArray(firstRow.Warning_Contraindications);
+      const warningAllergiesArray = Array.from(warningAllergies);
+      const warningInteractionsArray = Array.from(warningInteractions);
+      const warningContraindicationsArray = Array.from(warningContraindications);
       const hasWarnings =
-        warningAllergies.length > 0 ||
-        warningInteractions.length > 0 ||
-        warningContraindications.length > 0;
+        warningAllergiesArray.length > 0 ||
+        warningInteractionsArray.length > 0 ||
+        warningContraindicationsArray.length > 0;
 
       return {
         draftId: draft.draftId,
         proposedDrug,
-        proposedMedicine:
-          typeof firstRow.ProposedMedicine === "string" && firstRow.ProposedMedicine.trim()
-            ? firstRow.ProposedMedicine.trim()
-            : null,
-        warningAllergies,
-        warningInteractions,
-        warningContraindications,
+        queriedDrugs: queryCandidates,
+        proposedMedicine: Array.from(matchedMedicines)[0] ?? null,
+        warningAllergies: warningAllergiesArray,
+        warningInteractions: warningInteractionsArray,
+        warningContraindications: warningContraindicationsArray,
         status: hasWarnings ? "warning" : "safe",
       };
     }),

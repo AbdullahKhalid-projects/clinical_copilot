@@ -15,7 +15,8 @@
     "db:seed": "prisma db seed",
     "db:seed:templates": "npx tsx prisma/seeds/seed-templates.ts",
     "db:seed:doctor": "npx tsx prisma/seeds/seed-doctor.ts",
-    "db:seed:patient": "npx tsx prisma/seeds/seed-patient.ts"
+    "db:seed:patient": "npx tsx prisma/seeds/seed-patient.ts",
+    "db:seed:medicines": "node scripts/seed-medicine-catalog.js"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.53",
