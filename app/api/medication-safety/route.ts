@@ -3,6 +3,8 @@ import neo4j, { type Driver } from "neo4j-driver";
 import { currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { verifyPrescriptionSafetyQuery } from "@/code";
+import { buildMedicationQueryCandidates } from "@/lib/medication-query";
+import { resolveNeo4jPatientGraphId } from "@/lib/neo4j-patient-id";
 
 const NEO4J_URI = process.env.NEO4J_URI?.trim() ?? "";
 const NEO4J_USERNAME = process.env.NEO4J_USERNAME?.trim() ?? "";
@@ -14,6 +16,7 @@ let neo4jDriverSingleton: Driver | null = null;
 
 type MedicationSafetyReviewDraft = {
   draftId: string;
+  medicineCatalogId?: string | null;
   drugName: string;
   queryDrug?: string | null;
 };
@@ -21,6 +24,7 @@ type MedicationSafetyReviewDraft = {
 type MedicationSafetyReviewItemResult = {
   draftId: string;
   proposedDrug: string;
+  queriedDrugs?: string[];
   proposedMedicine: string | null;
   warningAllergies: string[];
   warningInteractions: string[];
@@ -166,15 +170,62 @@ export async function POST(request: Request) {
     );
   }
 
+  const neo4jPatientId = resolveNeo4jPatientGraphId({
+    appointmentPatientId: appointment.patientId,
+  });
+
   const results: MedicationSafetyReviewItemResult[] = [];
+  const medicineCatalogIds = Array.from(
+    new Set(
+      drafts
+        .map((draft) => draft.medicineCatalogId?.trim() || null)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+  const medicineCatalogRecords =
+    medicineCatalogIds.length > 0
+      ? await prisma.medicineCatalog.findMany({
+          where: {
+            id: {
+              in: medicineCatalogIds,
+            },
+          },
+        })
+      : [];
+  const medicineCatalogById = new Map(
+    medicineCatalogRecords.map((record) => [record.id, record]),
+  );
 
   for (const draft of drafts) {
-    const proposedDrug = draft.queryDrug?.trim() || draft.drugName.trim();
+    const medicineCatalogRecord = draft.medicineCatalogId
+      ? medicineCatalogById.get(draft.medicineCatalogId)
+      : undefined;
+    const queryCandidates = buildMedicationQueryCandidates({
+      drugName: draft.drugName,
+      genericName: medicineCatalogRecord?.genericName ?? null,
+      activeIngredients:
+        typeof medicineCatalogRecord?.activeIngredients === "string"
+          ? medicineCatalogRecord.activeIngredients
+              .split(";")
+              .map((item) => item.trim())
+              .filter((item) => item.length > 0)
+          : [],
+      primekgQueryTerms:
+        typeof medicineCatalogRecord?.primekgQueryTerms === "string"
+          ? medicineCatalogRecord.primekgQueryTerms
+              .split(";")
+              .map((item) => item.trim())
+              .filter((item) => item.length > 0)
+          : [],
+      fallbackQueryDrug: draft.queryDrug?.trim() || null,
+    });
+    const proposedDrug = queryCandidates[0] ?? draft.drugName.trim();
 
-    if (!proposedDrug) {
+    if (!proposedDrug || queryCandidates.length === 0) {
       results.push({
         draftId: draft.draftId,
         proposedDrug: "",
+        queriedDrugs: [],
         proposedMedicine: null,
         warningAllergies: [],
         warningInteractions: [],
@@ -184,55 +235,74 @@ export async function POST(request: Request) {
       continue;
     }
 
-    const queryResult = await runNeo4jReadQuery(verifyPrescriptionSafetyQuery, {
-      patientId: appointment.patientId,
-      proposedDrug,
-    });
+    const warningAllergies = new Set<string>();
+    const warningInteractions = new Set<string>();
+    const warningContraindications = new Set<string>();
+    const matchedMedicines = new Set<string>();
+    let matchedAnyCandidate = false;
+    let lastError: string | undefined;
 
-    if (!queryResult.ok) {
+    for (const candidate of queryCandidates) {
+      const queryResult = await runNeo4jReadQuery(verifyPrescriptionSafetyQuery, {
+        patientId: neo4jPatientId,
+        proposedDrug: candidate,
+      });
+
+      if (!queryResult.ok) {
+        lastError = queryResult.error;
+        continue;
+      }
+
+      const firstRow = queryResult.rows[0];
+      if (!firstRow) {
+        continue;
+      }
+
+      matchedAnyCandidate = true;
+      for (const item of toStringArray(firstRow.Warning_Allergies)) {
+        warningAllergies.add(item);
+      }
+      for (const item of toStringArray(firstRow.Warning_Interactions)) {
+        warningInteractions.add(item);
+      }
+      for (const item of toStringArray(firstRow.Warning_Contraindications)) {
+        warningContraindications.add(item);
+      }
+      if (
+        typeof firstRow.ProposedMedicine === "string" &&
+        firstRow.ProposedMedicine.trim()
+      ) {
+        matchedMedicines.add(firstRow.ProposedMedicine.trim());
+      }
+    }
+
+    if (!matchedAnyCandidate) {
       results.push({
         draftId: draft.draftId,
         proposedDrug,
+        queriedDrugs: queryCandidates,
         proposedMedicine: null,
         warningAllergies: [],
         warningInteractions: [],
         warningContraindications: [],
         status: "caution",
-        error: queryResult.error,
+        error:
+          lastError ??
+          "No Neo4j result rows found for this medication or its mapped compounds.",
       });
       continue;
     }
-
-    const firstRow = queryResult.rows[0];
-    if (!firstRow) {
-      results.push({
-        draftId: draft.draftId,
-        proposedDrug,
-        proposedMedicine: null,
-        warningAllergies: [],
-        warningInteractions: [],
-        warningContraindications: [],
-        status: "caution",
-      });
-      continue;
-    }
-
-    const warningAllergies = toStringArray(firstRow.Warning_Allergies);
-    const warningInteractions = toStringArray(firstRow.Warning_Interactions);
-    const warningContraindications = toStringArray(firstRow.Warning_Contraindications);
 
     results.push({
       draftId: draft.draftId,
       proposedDrug,
-      proposedMedicine:
-        typeof firstRow.ProposedMedicine === "string" && firstRow.ProposedMedicine.trim()
-          ? firstRow.ProposedMedicine.trim()
-          : null,
-      warningAllergies,
-      warningInteractions,
-      warningContraindications,
+      queriedDrugs: queryCandidates,
+      proposedMedicine: Array.from(matchedMedicines)[0] ?? null,
+      warningAllergies: Array.from(warningAllergies),
+      warningInteractions: Array.from(warningInteractions),
+      warningContraindications: Array.from(warningContraindications),
       status:
-        warningAllergies.length > 0 || warningInteractions.length > 0 || warningContraindications.length > 0
+        warningAllergies.size > 0 || warningInteractions.size > 0 || warningContraindications.size > 0
           ? "warning"
           : "safe",
     });
@@ -241,6 +311,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     success: true,
     patientId: appointment.patientId,
+    neo4jPatientId,
     results,
   });
 }

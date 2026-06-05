@@ -4,6 +4,7 @@ import {
   UserMessageAttachments,
 } from "@/components/attachment";
 import { MarkdownText } from "@/components/markdown-text";
+import { PrimeKgFollowupTool } from "@/components/primekg-followup-tool";
 import { ToolFallback } from "@/components/tool-fallback";
 import { TooltipIconButton } from "@/components/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,6 @@ import {
 import {
   ArrowDownIcon,
   ArrowUpIcon,
-  BookOpenText,
   CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
@@ -32,6 +32,7 @@ import {
   Mic,
   MoreHorizontalIcon,
   PencilIcon,
+  Pill,
   RefreshCwIcon,
   SquareIcon,
   UserRound,
@@ -49,6 +50,8 @@ type ThreadProps = {
   patientName?: string;
   retrievalMode?: "normal" | "semantic";
   onToggleRetrievalMode?: () => void;
+  primeKgMode?: boolean;
+  onTogglePrimeKgMode?: () => void;
 };
 
 type RetrievalPreview = {
@@ -86,6 +89,8 @@ export const Thread: FC<ThreadProps> = ({
   patientName = "Patient",
   retrievalMode = "normal",
   onToggleRetrievalMode,
+  primeKgMode = false,
+  onTogglePrimeKgMode,
 }) => {
   return (
     <ThreadPrimitive.Root
@@ -121,6 +126,8 @@ export const Thread: FC<ThreadProps> = ({
               patientName={patientName}
               retrievalMode={retrievalMode}
               onToggleRetrievalMode={onToggleRetrievalMode}
+              primeKgMode={primeKgMode}
+              onTogglePrimeKgMode={onTogglePrimeKgMode}
             />
           </ThreadPrimitive.ViewportFooter>
         </div>
@@ -173,7 +180,15 @@ const Composer: FC<{
   patientName: string;
   retrievalMode?: "normal" | "semantic";
   onToggleRetrievalMode?: () => void;
-}> = ({ patientName, retrievalMode = "normal", onToggleRetrievalMode }) => {
+  primeKgMode?: boolean;
+  onTogglePrimeKgMode?: () => void;
+}> = ({
+  patientName,
+  retrievalMode = "normal",
+  onToggleRetrievalMode,
+  primeKgMode = false,
+  onTogglePrimeKgMode,
+}) => {
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <ComposerPrimitive.AttachmentDropzone asChild>
@@ -195,7 +210,9 @@ const Composer: FC<{
           <ComposerAttachments />
           <ComposerPrimitive.Input
             placeholder={
-              retrievalMode === "semantic"
+              primeKgMode
+                ? "Ask a PrimeKG drug or disease question..."
+                : retrievalMode === "semantic"
                 ? "Search your document library..."
                 : "Ask a follow-up question..."
             }
@@ -207,6 +224,8 @@ const Composer: FC<{
           <ComposerAction
             retrievalMode={retrievalMode}
             onToggleRetrievalMode={onToggleRetrievalMode}
+            primeKgMode={primeKgMode}
+            onTogglePrimeKgMode={onTogglePrimeKgMode}
           />
         </div>
       </ComposerPrimitive.AttachmentDropzone>
@@ -217,8 +236,14 @@ const Composer: FC<{
 const ComposerAction: FC<{
   retrievalMode?: "normal" | "semantic";
   onToggleRetrievalMode?: () => void;
-}> = ({ retrievalMode = "normal", onToggleRetrievalMode }) => {
-  const isSemantic = retrievalMode === "semantic";
+  primeKgMode?: boolean;
+  onTogglePrimeKgMode?: () => void;
+}> = ({
+  retrievalMode = "normal",
+  primeKgMode = false,
+  onTogglePrimeKgMode,
+}) => {
+  void retrievalMode;
 
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between gap-1.5">
@@ -227,31 +252,31 @@ const ComposerAction: FC<{
         <div
           className={cn(
             "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 transition-colors",
-            isSemantic
-              ? "border-[#7469C3]/30 bg-[#7469C3]/10"
+            primeKgMode
+              ? "border-[#2C7A64]/30 bg-[#2C7A64]/10"
               : "border-transparent hover:bg-muted/50"
           )}
         >
-          <BookOpenText
+          <Pill
             className={cn(
               "h-3.5 w-3.5 shrink-0",
-              isSemantic ? "text-[#7469C3]" : "text-muted-foreground"
+              primeKgMode ? "text-[#2C7A64]" : "text-muted-foreground"
             )}
           />
           <Label
-            htmlFor="retrieval-mode-switch"
+            htmlFor="primekg-mode-switch"
             className={cn(
               "cursor-pointer select-none text-[11px] font-medium leading-none",
-              isSemantic ? "text-[#7469C3]" : "text-muted-foreground"
+              primeKgMode ? "text-[#2C7A64]" : "text-muted-foreground"
             )}
           >
-            {isSemantic ? "Doc Search" : "Doc Search"}
+            PrimeKG
           </Label>
           <Switch
-            id="retrieval-mode-switch"
-            checked={isSemantic}
-            onCheckedChange={onToggleRetrievalMode}
-            className="h-3.5 w-7 data-[state=checked]:bg-[#7469C3]"
+            id="primekg-mode-switch"
+            checked={primeKgMode}
+            onCheckedChange={onTogglePrimeKgMode}
+            className="h-3.5 w-7 data-[state=checked]:bg-[#2C7A64]"
           />
         </div>
       </div>
@@ -355,7 +380,12 @@ const AssistantMessage: FC = () => {
           components={{
             Text: MarkdownText,
             Reasoning: ReasoningCollapsible,
-            tools: { Fallback: ToolFallback },
+            tools: {
+              by_name: {
+                offer_medication_followups: PrimeKgFollowupTool,
+              },
+              Fallback: ToolFallback,
+            },
           }}
         />
         {retrievalPreview && (
