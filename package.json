@@ -16,6 +16,7 @@
     "db:seed:templates": "npx tsx prisma/seeds/seed-templates.ts",
     "db:seed:doctor": "npx tsx prisma/seeds/seed-doctor.ts",
     "db:seed:patient": "npx tsx prisma/seeds/seed-patient.ts",
+    "eval": "tsx evals/runner.ts",
     "db:seed:medicines": "node scripts/seed-medicine-catalog.js"
   },
   "dependencies": {
@@ -115,6 +116,7 @@
     "prisma": "^7.3.0",
     "shadcn": "^4.10.0",
     "tailwindcss": "^4.1.9",
+    "tsx": "^4.0.0",
     "tw-animate-css": "1.3.3",
     "typescript": "^5"
   }
