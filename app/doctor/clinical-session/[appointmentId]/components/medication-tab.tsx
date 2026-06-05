@@ -724,12 +724,12 @@ export function MedicationTab({
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div className="text-xs text-muted-foreground">
                             {safetyReview?.status === "warning"
-                              ? "Warnings found for this medication."
+                              ? "Allergy warnings found for this medication."
                               : safetyReview?.status === "safe"
-                              ? "No graph safety warnings found."
+                              ? "No graph allergy warnings found."
                               : safetyReview?.status === "caution"
                               ? "This medication could not be resolved cleanly."
-                              : "Run Shifa on this medication to check safety."}
+                              : "Run Shifa on this medication to check allergy safety."}
                           </div>
                           <ShifaActionPill
                             disabled={!hasLinkedPatient || isDraftReviewRunning || isSafetyReviewRunning}

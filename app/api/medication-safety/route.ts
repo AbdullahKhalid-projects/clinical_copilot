@@ -301,10 +301,7 @@ export async function POST(request: Request) {
       warningAllergies: Array.from(warningAllergies),
       warningInteractions: Array.from(warningInteractions),
       warningContraindications: Array.from(warningContraindications),
-      status:
-        warningAllergies.size > 0 || warningInteractions.size > 0 || warningContraindications.size > 0
-          ? "warning"
-          : "safe",
+      status: warningAllergies.size > 0 ? "warning" : "safe",
     });
   }
 

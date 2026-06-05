@@ -753,10 +753,7 @@ export async function runMedicationSafetyReview(
       const warningAllergiesArray = Array.from(warningAllergies);
       const warningInteractionsArray = Array.from(warningInteractions);
       const warningContraindicationsArray = Array.from(warningContraindications);
-      const hasWarnings =
-        warningAllergiesArray.length > 0 ||
-        warningInteractionsArray.length > 0 ||
-        warningContraindicationsArray.length > 0;
+      const hasWarnings = warningAllergiesArray.length > 0;
 
       return {
         draftId: draft.draftId,

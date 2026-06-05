@@ -161,15 +161,15 @@ function buildMedicationSafetyPrompt(args: {
         .join("\n");
 
     return [
-        "Run a medication safety review for the staged prescriptions in this clinical session.",
+        "Run an allergy safety review for the staged prescriptions in this clinical session.",
         "Use the verify_prescription_safety tool for every staged medication.",
         "For proposedDrug, use the provided compound query term, not the brand/display name.",
         "Before you offer any next actions, give the doctor a visible concise summary in 2 to 4 short bullet points.",
-        "If there are allergy, interaction, or contraindication warnings, say that explicitly in the visible summary.",
+        "If there are allergy or cross-reaction warnings, say that explicitly in the visible summary.",
         "After finishing the safety review, call the offer_medication_followups tool instead of asking a plain-text follow-up question.",
         "Pass every staged medication into offer_medication_followups using the display medication name, compound query term, generic name if available, and active ingredients if available.",
-        "Return one concise visible section per medication with: overall status, allergy conflicts, drug interactions, and contraindications.",
-        "If no warnings are found, explicitly say the graph safety check found no warnings.",
+        "Return one concise visible section per medication with: overall status and allergy conflicts.",
+        "If no warnings are found, explicitly say the graph allergy safety check found no warnings.",
         "",
         "Staged medications:",
         medicationLines,

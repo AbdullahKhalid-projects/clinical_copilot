@@ -799,27 +799,14 @@ function formatNeo4jPrescriptionSafetyToolOutput(
     result.warningAllergies.length > 0
       ? result.warningAllergies.join(", ")
       : "None detected";
-  const interactions =
-    result.warningInteractions.length > 0
-      ? result.warningInteractions.join(", ")
-      : "None detected";
-  const contraindications =
-    result.warningContraindications.length > 0
-      ? result.warningContraindications.join(", ")
-      : "None detected";
-  const hasWarnings =
-    result.warningAllergies.length > 0 ||
-    result.warningInteractions.length > 0 ||
-    result.warningContraindications.length > 0;
+  const hasWarnings = result.warningAllergies.length > 0;
 
   return [
     `Prescription safety verification completed for patient: ${result.patientId}`,
     `Proposed drug: ${result.proposedMedicine ?? result.proposedDrug}`,
-    `Overall status: ${hasWarnings ? "WARNINGS FOUND" : "NO WARNINGS FOUND"}`,
+    `Overall status: ${hasWarnings ? "ALLERGY WARNINGS FOUND" : "NO ALLERGY WARNINGS FOUND"}`,
     "",
     `Allergy conflicts: ${allergies}`,
-    `Drug interactions: ${interactions}`,
-    `Contraindications: ${contraindications}`,
   ].join("\n");
 }
 
@@ -2213,7 +2200,7 @@ export async function POST(request: Request) {
             "- For previous session conversations, use retrieveLastSession.",
             "- For previous visit SOAP notes, use getLastSoapNote.",
             "- For patient overviews, allergies, or medication lists, use get_patient_clinical_summary.",
-            "- To check a specific drug in a prescribing context, use verify_prescription_safety.",
+            "- To check whether a specific drug conflicts with the patient's allergies or cross-reactive allergies, use verify_prescription_safety.",
             "- To find treatment alternatives, use suggest_safe_alternatives.",
             "- Use get_primekg_drug_context only for general knowledge-graph questions about a specific drug, such as what it is indicated for, what diseases it is contraindicated in, or what proteins/targets it connects to in PrimeKG.",
             "- Use get_primekg_disease_context only for general knowledge-graph questions about a specific disease, such as what drugs are indicated for it, what drugs are contraindicated, or what related diseases it connects to in PrimeKG.",
@@ -2485,7 +2472,7 @@ export async function POST(request: Request) {
         }),
         verify_prescription_safety: tool({
           description:
-            "Safety-check a proposed medication before prescribing. Use this whenever the doctor asks things like 'should I give him this medicine', 'can I prescribe', 'is it safe to prescribe', or mentions a specific drug name in a prescribing context. Checks allergies, cross-reactions, drug interactions, and contraindications.",
+            "Check a proposed medication against the patient's allergies and cross-reactive allergies before prescribing. Use this whenever the doctor asks things like 'is this allergy-safe', 'can I give this with this allergy history', or mentions a specific drug in an allergy-safety prescribing context. This tool does not perform reliable drug interaction or contraindication analysis.",
           inputSchema: z.object({
             patientId: z
               .string()

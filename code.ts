@@ -49,25 +49,16 @@ WHERE p.name CONTAINS $patientId
 MATCH (med:ClinicalEntity)
 WHERE toLower(med.name) = toLower($proposedDrug)
 
-// Check Allergies & Cross-Reactions
+// Check only allergies and cross-reactions.
 OPTIONAL MATCH (p)-[:RELATES_TO {relationType: "ALLERGIC_TO"}]->(allergen:ClinicalEntity)
 WHERE toLower(allergen.name) = toLower(med.name)
    OR EXISTS { (med)-[:RELATES_TO {relationType: "CROSS_REACTS_WITH"}]-(allergen) }
 WITH p, med, collect(DISTINCT allergen.name) AS AllergyConflicts
 
-// Check Drug Interactions
-OPTIONAL MATCH (p)-[:RELATES_TO {relationType: "ON_MEDICATION"}]->(currentMed:ClinicalEntity)
-WHERE EXISTS { (med)-[:RELATES_TO {relationType: "INTERACTS_WITH"}]-(currentMed) }
-WITH p, med, AllergyConflicts, collect(DISTINCT currentMed.name) AS InteractionAlerts
-
-// Check Disease Contraindications
-OPTIONAL MATCH (p)-[:RELATES_TO {relationType: "HAS_CONDITION"}]->(condition:ClinicalEntity)
-WHERE EXISTS { (med)-[:RELATES_TO {relationType: "CONTRAINDICATED_FOR"}]-(condition) }
-
 RETURN med.name AS ProposedMedicine,
        AllergyConflicts AS Warning_Allergies,
-       InteractionAlerts AS Warning_Interactions,
-       collect(DISTINCT condition.name) AS Warning_Contraindications
+       [] AS Warning_Interactions,
+       [] AS Warning_Contraindications
 `;
 
 export const suggestSafeAlternativesQuery = `
