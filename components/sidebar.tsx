@@ -191,10 +191,12 @@ export function Sidebar({ role }: SidebarProps) {
           <SidebarMenu>
             <SidebarMenuItem>
               {/* Header Box */}
-              <div className="flex w-full items-center justify-between rounded-lg bg-yellow-300 p-3 transition-all duration-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-2">
-                <span className="whitespace-nowrap text-lg font-black tracking-tight text-black group-data-[collapsible=icon]:hidden w-full text-center">
-                  Shifa Scribe
-                </span>
+              <div className="flex w-full items-center justify-between rounded-lg p-3 transition-all duration-300 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-2">
+                <img
+                  src="/shifascribelogoooo.svg"
+                  alt="Shifa Scribe"
+                  className="h-18 w-auto group-data-[collapsible=icon]:hidden"
+                />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <SidebarTrigger className="text-black hover:bg-black/10 shrink-0" />
